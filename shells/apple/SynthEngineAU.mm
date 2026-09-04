@@ -11,9 +11,10 @@
 
 namespace {
 
-constexpr AUParameterAddress kFirstParameter = 1;
+constexpr AUParameterAddress kFirstParameter = 0;
 constexpr AUParameterAddress kLastParameter = 8;
 constexpr uint32_t kParameterCount = 9;
+constexpr uint32_t kAllParametersDirty = (1u << kParameterCount) - 1u;
 constexpr uint32_t kMaximumEvents = 2048;
 
 struct DeferredEvent {
@@ -48,6 +49,7 @@ struct ParameterDefinition {
 };
 
 const ParameterDefinition kParameterDefinitions[] = {
+    {0, @"oscAWavetable", @"Osc A Wavetable", 0.0f, 3.0f, 0.0f, kAudioUnitParameterUnit_Indexed},
     {1, @"oscAMorph", @"Osc A Morph", 0.0f, 1.0f, 0.0f, kAudioUnitParameterUnit_Generic},
     {2, @"oscALevel", @"Osc A Level", 0.0f, 4.0f, 0.8f, kAudioUnitParameterUnit_LinearGain},
     {3, @"ampAttack", @"Amp Attack", 0.0f, 60.0f, 0.005f, kAudioUnitParameterUnit_Seconds},
@@ -57,6 +59,15 @@ const ParameterDefinition kParameterDefinitions[] = {
     {7, @"masterGain", @"Master Gain", 0.0f, 4.0f, 0.2f, kAudioUnitParameterUnit_LinearGain},
     {8, @"voiceCountMax", @"Voice Count Max", 1.0f, 16.0f, 16.0f, kAudioUnitParameterUnit_Indexed},
 };
+
+const AUValue kSinePadValues[] = {
+    0.0f, 0.0f, 0.8f, 0.8f, 2.0f, 0.7f, 1.5f, 0.2f, 16.0f};
+const AUValue kSawLeadValues[] = {
+    1.0f, 0.0f, 0.8f, 0.003f, 0.15f, 0.6f, 0.15f, 0.2f, 16.0f};
+
+static_assert(sizeof(kParameterDefinitions) / sizeof(kParameterDefinitions[0]) == kParameterCount);
+static_assert(sizeof(kSinePadValues) / sizeof(kSinePadValues[0]) == kParameterCount);
+static_assert(sizeof(kSawLeadValues) / sizeof(kSawLeadValues[0]) == kParameterCount);
 
 void clearOutput(AudioBufferList* outputData, AUAudioFrameCount frameCount) {
     if (outputData == nullptr) return;
@@ -232,6 +243,8 @@ NSError* makeError(NSInteger code, NSString* description) {
 @interface SynthEngineAudioUnit : AUAudioUnit {
     AUAudioUnitBusArray* _inputBusArray;
     AUAudioUnitBusArray* _outputBusArray;
+    NSArray<AUAudioUnitPreset*>* _factoryPresets;
+    AUAudioUnitPreset* _currentPreset;
     RenderContext* _renderContext;
 }
 @end
@@ -249,7 +262,7 @@ NSError* makeError(NSInteger code, NSString* description) {
         _renderContext->parameterValues[definition.address].store(definition.defaultValue,
                                                                   std::memory_order_relaxed);
     }
-    _renderContext->dirtyParameters.store(0x1FEu, std::memory_order_relaxed);
+    _renderContext->dirtyParameters.store(kAllParametersDirty, std::memory_order_relaxed);
 
     AVAudioFormat* format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:44100.0
                                                                            channels:2];
@@ -296,6 +309,18 @@ NSError* makeError(NSInteger code, NSString* description) {
         return context->parameterValues[address].load(std::memory_order_relaxed);
     };
     self.parameterTree = tree;
+
+    AUAudioUnitPreset* initPreset = [[AUAudioUnitPreset alloc] init];
+    initPreset.number = 0;
+    initPreset.name = @"Init";
+    AUAudioUnitPreset* sinePadPreset = [[AUAudioUnitPreset alloc] init];
+    sinePadPreset.number = 1;
+    sinePadPreset.name = @"Sine Pad";
+    AUAudioUnitPreset* sawLeadPreset = [[AUAudioUnitPreset alloc] init];
+    sawLeadPreset.number = 2;
+    sawLeadPreset.name = @"Saw Lead";
+    _factoryPresets = @[initPreset, sinePadPreset, sawLeadPreset];
+    _currentPreset = initPreset;
     return self;
 }
 
@@ -307,6 +332,42 @@ NSError* makeError(NSInteger code, NSString* description) {
 - (AUAudioUnitBusArray*)inputBusses { return _inputBusArray; }
 - (AUAudioUnitBusArray*)outputBusses { return _outputBusArray; }
 - (NSArray<NSNumber*>*)channelCapabilities { return @[@0, @1, @0, @2]; }
+
+- (NSArray<AUAudioUnitPreset*>*)factoryPresets { return _factoryPresets; }
+- (BOOL)supportsUserPresets { return YES; }
+
+- (AUAudioUnitPreset*)currentPreset { return _currentPreset; }
+
+- (void)setCurrentPreset:(AUAudioUnitPreset*)preset {
+    if (preset == nil) {
+        _currentPreset = nil;
+        return;
+    }
+
+    if (preset.number < 0) {
+        NSDictionary<NSString*, id>* state = [self presetStateFor:preset error:nil];
+        if (state != nil) self.fullState = state;
+        _currentPreset = preset;
+        return;
+    }
+
+    const AUValue* values = nullptr;
+    if (preset.number == 1) values = kSinePadValues;
+    else if (preset.number == 2) values = kSawLeadValues;
+    else if (preset.number != 0) return;
+
+    NSUInteger index = 0;
+    for (const ParameterDefinition& definition : kParameterDefinitions) {
+        const AUValue value = values == nullptr ? definition.defaultValue : values[index];
+        _renderContext->parameterValues[definition.address].store(value,
+                                                                  std::memory_order_relaxed);
+        _renderContext->dirtyParameters.fetch_or(1u << definition.address,
+                                                  std::memory_order_release);
+        self.parameterTree.allParameters[index].value = value;
+        ++index;
+    }
+    _currentPreset = _factoryPresets[static_cast<NSUInteger>(preset.number)];
+}
 
 - (NSTimeInterval)tailTime {
     return static_cast<NSTimeInterval>(
@@ -351,7 +412,7 @@ NSError* makeError(NSInteger code, NSString* description) {
         return NO;
     }
     context->deferredEventCount = 0;
-    context->dirtyParameters.store(0x1FEu, std::memory_order_release);
+    context->dirtyParameters.store(kAllParametersDirty, std::memory_order_release);
     applyPendingParameters(context);
     return YES;
 }
