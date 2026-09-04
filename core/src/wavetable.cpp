@@ -37,13 +37,22 @@ float builtin_sample(BuiltinShape shape, uint32_t index, uint32_t limit) {
 }  // namespace
 
 void initialize_builtin_wavetables(WavetableBank* bank) {
+    static constexpr BuiltinShape shapes[kWavetableSlots][kMaxWavetableFrames] = {
+        {kSine, kTriangle, kSaw, kSquare},
+        {kSaw, kSaw, kSaw, kSaw},
+        {kSquare, kSquare, kSquare, kSquare},
+        {kTriangle, kTriangle, kTriangle, kTriangle}
+    };
     for (uint32_t slot = 0; slot < kWavetableSlots; ++slot) {
-        bank->frameCount[slot] = 1;
-        for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
-            const uint32_t limit = harmonic_limit(mip);
-            for (uint32_t i = 0; i < kTableSize; ++i) {
-                bank->samples[slot][0][mip][i] =
-                    builtin_sample(static_cast<BuiltinShape>(slot), i, limit);
+        const uint32_t frameCount = slot == 0 ? 4u : 1u;
+        bank->frameCount[slot] = frameCount;
+        for (uint32_t frame = 0; frame < frameCount; ++frame) {
+            for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
+                const uint32_t limit = harmonic_limit(mip);
+                for (uint32_t i = 0; i < kTableSize; ++i) {
+                    bank->samples[slot][frame][mip][i] =
+                        builtin_sample(shapes[slot][frame], i, limit);
+                }
             }
         }
     }

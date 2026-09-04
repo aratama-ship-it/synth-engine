@@ -7,7 +7,8 @@
 namespace synth {
 
 constexpr uint32_t kVoiceCapacity = 16;
-constexpr uint32_t kParamCount = 9;
+constexpr uint32_t kParamCount = 35;
+constexpr uint32_t kMaxUnison = 4;
 
 enum EnvelopeStage : uint32_t {
     kEnvOff = 0,
@@ -23,8 +24,16 @@ struct Voice {
     uint32_t stage;
     uint64_t startOrder;
     uint64_t releaseOrder;
-    double phase;
-    double frequency;
+    double baseFrequency;
+    double phaseA[kMaxUnison];
+    double phaseB[kMaxUnison];
+    double frequencyA[kMaxUnison];
+    double frequencyB[kMaxUnison];
+    double phaseSub;
+    double frequencySub;
+    uint64_t sampleIndex;
+    float noiseEnvelope;
+    float pinkState[3];
     float velocity;
     float envelope;
 };
@@ -37,6 +46,8 @@ struct SynthEngine {
     uint32_t voiceLimit;
     uint64_t seed;
     uint64_t orderCounter;
+    float noiseDecayCoefficient;
+    float pinkCoefficient[3];
     float params[synth::kParamCount];
     synth::Voice voices[synth::kVoiceCapacity];
     synth::WavetableBank wavetable;
