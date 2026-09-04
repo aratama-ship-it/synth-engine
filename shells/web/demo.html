@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SynthEngine Web M0c</title>
+  <style>
+    :root {
+      --color-bg: #11130f;
+      --color-panel: #1b1e18;
+      --color-line: #3e4436;
+      --color-text: #f2f0e7;
+      --color-sub: #b9beac;
+      --color-accent: #d7ff4f;
+      --color-error: #ff8e7a;
+      --font-ui: ui-monospace, "SFMono-Regular", Consolas, monospace;
+      --fs-title: 30px;
+      --fs-body: 15px;
+      --fs-small: 12px;
+      --line-body: 1.55;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 16px;
+      --space-4: 24px;
+      --space-5: 40px;
+      --radius: 3px;
+      --content-width: 960px;
+      --control-height: 48px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--color-text);
+      background: var(--color-bg);
+      font: var(--fs-body)/var(--line-body) var(--font-ui);
+    }
+    header, main { width: min(calc(100% - 32px), var(--content-width)); margin-inline: auto; }
+    header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: var(--space-3);
+      padding-block: var(--space-4);
+      border-bottom: 1px solid var(--color-line);
+    }
+    h1, h2, p { margin: 0; }
+    h1 { font-size: var(--fs-title); line-height: 1.1; letter-spacing: -0.04em; }
+    h2 { margin-bottom: var(--space-3); font-size: 16px; letter-spacing: 0.04em; }
+    .version { order: -1; color: var(--color-accent); font-size: var(--fs-small); }
+    main { padding-block: var(--space-4) var(--space-5); }
+    .lead { max-width: 68ch; color: var(--color-sub); }
+    .controls { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); }
+    button {
+      min-height: var(--control-height);
+      padding: 0 var(--space-3);
+      border: 1px solid var(--color-accent);
+      border-radius: var(--radius);
+      color: var(--color-bg);
+      background: var(--color-accent);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button.secondary { color: var(--color-accent); background: transparent; }
+    button:disabled { cursor: not-allowed; opacity: 0.45; }
+    button:focus-visible { outline: 3px solid var(--color-text); outline-offset: 3px; }
+    .status {
+      min-height: var(--control-height);
+      margin-top: var(--space-3);
+      padding: 12px var(--space-3);
+      border-left: 3px solid var(--color-accent);
+      background: var(--color-panel);
+    }
+    .status.error { border-color: var(--color-error); color: var(--color-error); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--space-3);
+      margin-top: var(--space-4);
+    }
+    section { padding: var(--space-4); border: 1px solid var(--color-line); background: var(--color-panel); }
+    dl { display: grid; grid-template-columns: minmax(140px, 1fr) auto; gap: var(--space-2) var(--space-3); margin: 0; }
+    dt { color: var(--color-sub); }
+    dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+    .keyboard { grid-column: 1 / -1; }
+    .keys { margin-top: var(--space-2); color: var(--color-accent); overflow-wrap: anywhere; }
+    .fine { margin-top: var(--space-3); color: var(--color-sub); font-size: var(--fs-small); }
+    @media (max-width: 680px) {
+      h1 { font-size: 24px; }
+      .grid { grid-template-columns: 1fr; }
+      .keyboard { grid-column: auto; }
+      section { padding: var(--space-3); }
+      dl { grid-template-columns: 1fr; }
+      dd { text-align: left; margin-bottom: var(--space-2); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SynthEngine / Web probe</h1>
+    <span class="version">v0.1.0</span>
+  </header>
+  <main>
+    <p class="lead">同じ DSP コアを AudioWorklet で鳴らし、10秒のオフライン出力を native CLI と数値比較する M0c 検証画面です。</p>
+    <div class="controls">
+      <button id="start-button" type="button">開始</button>
+      <button id="render-button" class="secondary" type="button">オフライン10秒レンダー</button>
+    </div>
+    <p id="status" class="status" role="status" aria-live="polite">WASM を読み込んでいます…</p>
+
+    <div class="grid">
+      <section class="keyboard">
+        <h2>LIVE INPUT</h2>
+        <p>開始後、A〜Z キーを押している間だけ発音します。A=60、以降はアルファベット順に半音ずつ上がります。</p>
+        <p class="keys" aria-hidden="true">A B C D E F G H I J K L M N O P Q R S T U V W X Y Z</p>
+      </section>
+
+      <section>
+        <h2>RENDER SIGNAL</h2>
+        <dl>
+          <dt>peak</dt><dd id="peak-value">—</dd>
+          <dt>rms</dt><dd id="rms-value">—</dd>
+          <dt>nan</dt><dd id="nan-value">—</dd>
+        </dl>
+      </section>
+
+      <section>
+        <h2>NATIVE COMPARISON</h2>
+        <dl>
+          <dt>比較フレーム</dt><dd id="compare-frames">—</dd>
+          <dt>最大差</dt><dd id="max-diff">—</dd>
+          <dt>RMS差</dt><dd id="rms-diff">—</dd>
+        </dl>
+        <p class="fine">基準: 最大 −100 dBFS 以下 / RMS −120 dBFS 以下</p>
+      </section>
+
+      <section>
+        <h2>WASM</h2>
+        <dl>
+          <dt>raw</dt><dd id="wasm-raw">—</dd>
+          <dt>gzip</dt><dd id="wasm-gzip">—</dd>
+          <dt>batch ready</dt><dd id="ready-time">—</dd>
+        </dl>
+      </section>
+
+      <section>
+        <h2>PROCESS / LAST 1000</h2>
+        <dl>
+          <dt>average</dt><dd id="process-average">—</dd>
+          <dt>p99</dt><dd id="process-p99">—</dd>
+          <dt>samples</dt><dd id="process-blocks">—</dd>
+        </dl>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="./demo.js"></script>
+</body>
+</html>

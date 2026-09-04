@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>SynthEngine AU</string>
+    <key>CFBundleExecutable</key>
+    <string>SynthEngineAU</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.pygmix.synthengine.au</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>SynthEngineAU</string>
+    <key>CFBundlePackageType</key>
+    <string>XPC!</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>NSExtension</key>
+    <dict>
+        <key>NSExtensionAttributes</key>
+        <dict>
+            <key>AudioComponents</key>
+            <array>
+                <dict>
+                    <key>manufacturer</key>
+                    <string>Arat</string>
+                    <key>name</key>
+                    <string>ARATA URAWA: SynthEngine</string>
+                    <key>sandboxSafe</key>
+                    <true/>
+                    <key>subtype</key>
+                    <string>Sken</string>
+                    <key>tags</key>
+                    <array>
+                        <string>Synthesizer</string>
+                    </array>
+                    <key>type</key>
+                    <string>aumu</string>
+                    <key>version</key>
+                    <integer>256</integer>
+                </dict>
+            </array>
+        </dict>
+        <key>NSExtensionPointIdentifier</key>
+        <string>com.apple.AudioUnit</string>
+        <key>NSExtensionPrincipalClass</key>
+        <string>SynthEngineAUFactory</string>
+    </dict>
+</dict>
+</plist>
