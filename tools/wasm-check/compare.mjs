@@ -1,6 +1,7 @@
 // native(CLI WAV) vs wasm(node) の差分測定。M0 合否基準3の先行確認。
 // 使い方: node tools/wasm-check/compare.mjs build/synth_engine.wasm presets/m0_saw.txt fixtures/m0_events_chord.txt build/out.wav 48000 128 96000
 import fs from "node:fs";
+import { readFloat32Wav } from "../lib/wav.mjs";
 const [wasmPath, presetPath, eventsPath, wavPath, srArg, blockArg, framesArg] = process.argv.slice(2);
 const sr = Number(srArg), block = Number(blockArg), totalFrames = Number(framesArg);
 const bytes = fs.readFileSync(wasmPath);
@@ -48,18 +49,9 @@ for (let start = 0; start < totalFrames; start += block) {
   outR.set(new Float32Array(mem.buffer, outRPtr, n), start);
 }
 // WAV parse (RIFF, float32 stereo)
-const wav = fs.readFileSync(wavPath); const wdv = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
-let pos = 12, fmt = null, data = null;
-while (pos + 8 <= wav.length) {
-  const id = wav.toString("ascii", pos, pos + 4); const size = wdv.getUint32(pos + 4, true);
-  if (id === "fmt ") fmt = { format: wdv.getUint16(pos + 8, true), ch: wdv.getUint16(pos + 10, true), sr: wdv.getUint32(pos + 12, true), bits: wdv.getUint16(pos + 22, true) };
-  if (id === "data") data = { off: pos + 8, size };
-  pos += 8 + size + (size & 1);
-}
+const { fmt, samples: nat, frames: natFrames } = readFloat32Wav(wavPath);
 console.log("wav fmt:", JSON.stringify(fmt));
-const nat = new Float32Array(data.size / 4);
-for (let i = 0; i < nat.length; i++) nat[i] = wdv.getFloat32(data.off + i * 4, true);
-const natFrames = nat.length / fmt.ch; console.log("native frames:", natFrames, "wasm frames:", totalFrames);
+console.log("native frames:", natFrames, "wasm frames:", totalFrames);
 let maxDiff = 0, sumSq = 0, sumSqSig = 0, nanCount = 0, peakW = 0;
 const N = Math.min(natFrames, totalFrames);
 for (let i = 0; i < N; i++) {
