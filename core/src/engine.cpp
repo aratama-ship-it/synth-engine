@@ -255,10 +255,10 @@ synth::Voice* choose_voice(SynthEngine* engine, uint32_t noteId) {
     return oldest;
 }
 
-double hashed_phase(const SynthEngine* engine, uint32_t noteId, uint32_t voiceIndex,
+double hashed_phase(const SynthEngine* engine, uint32_t startOrder, uint32_t voiceIndex,
                     uint32_t layer) {
     return static_cast<double>(synth::hash_to_unit(
-        synth::hash32(engine->seed, noteId, voiceIndex, layer)));
+        synth::hash32(engine->seed, startOrder, voiceIndex, layer)));
 }
 
 void note_on(SynthEngine* engine, const SynthEvent& event) {
@@ -278,15 +278,16 @@ void note_on(SynthEngine* engine, const SynthEvent& event) {
 
     const bool fixedA = engine->params[kOscAPhaseMode] == 1.0f;
     const bool fixedB = engine->params[kOscBPhaseMode] == 1.0f;
+    const uint32_t startOrder = static_cast<uint32_t>(voice->startOrder);
     for (uint32_t i = 0; i < synth::kMaxUnison; ++i) {
         voice->phaseA[i] = fixedA ? static_cast<double>(engine->params[kOscAPhase])
-                                  : hashed_phase(engine, event.id, voiceIndex, i);
+                                  : hashed_phase(engine, startOrder, voiceIndex, i);
         voice->phaseB[i] = fixedB ? static_cast<double>(engine->params[kOscBPhase])
-                                  : hashed_phase(engine, event.id, voiceIndex, 8u + i);
+                                  : hashed_phase(engine, startOrder, voiceIndex, 8u + i);
     }
     // M0a began at 0.25 cycle. Preserve that exact path when every M1a source is disabled.
     if (!fixedA && legacy_configuration(engine)) voice->phaseA[0] = 0.25;
-    voice->phaseSub = hashed_phase(engine, event.id, voiceIndex, 16u);
+    voice->phaseSub = hashed_phase(engine, startOrder, voiceIndex, 16u);
     voice->lfoPhase = static_cast<double>(engine->params[kLfoPhase]);
     voice->lfoCycleIndex = 0;
     voice->lfoHold = lfo_hash_value(engine, 0, voiceIndex);
@@ -490,7 +491,8 @@ void advance_lfo(double* phase, uint64_t* cycleIndex, float* held,
 
 float render_noise(SynthEngine* engine, synth::Voice* voice) {
     const float white = synth::hash_to_unit(synth::hash32(
-        engine->seed, voice->noteId, static_cast<uint32_t>(voice->sampleIndex), 3u)) * 2.0f - 1.0f;
+        engine->seed, static_cast<uint32_t>(voice->startOrder),
+        static_cast<uint32_t>(voice->sampleIndex), 3u)) * 2.0f - 1.0f;
     if (engine->params[kNoiseColor] == 0.0f) return white * voice->noiseEnvelope;
     for (uint32_t i = 0; i < 3; ++i) {
         const float coefficient = engine->pinkCoefficient[i];
@@ -887,4 +889,4 @@ extern "C" uint32_t synth_get_tail_frames(const SynthEngine* engine) {
     return frames <= 0.0 ? 0u : static_cast<uint32_t>(frames + 0.999999);
 }
 
-extern "C" uint32_t synth_engine_version(void) { return 4; }
+extern "C" uint32_t synth_engine_version(void) { return 5; }

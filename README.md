@@ -45,8 +45,8 @@ JUCE も AGPL か商用ライセンスの二択です。**ライセンスの都�
 
 | 測定 | 結果 |
 |---|---|
-| **AU と CLI の出力** | **ビット一致**（ベロシティが MIDI の7bitで表せる値のとき） |
-| **wasm と native の差（M0基準）** | 最大 −133.6 dBFS ／ RMS −162.2 dBFS |
+| **AU と CLI の出力** | **ビット一致**（素の波形／ユニゾン／フィルタスイープの3プリセットで確認。ベロシティが MIDI の7bitで表せる値のとき） |
+| **wasm と native の差** | 最大 −133〜135 dBFS ／ RMS −160〜164 dBFS（同じ3プリセットで確認。float32 の丸め程度） |
 | ブロックサイズ不変性 | block 1／7／64／128／511 でビット一致 |
 | サンプルレート | 44.1／48／96 kHz すべてで NaN・Inf ゼロ |
 | 処理時間 | LP24・LFO・16音 × ユニゾン4で平均 167 µs・p99 216 µs（48 kHz / 128 frames、期限の50%は1333.5 µs） |
@@ -55,14 +55,14 @@ JUCE も AGPL か商用ライセンスの二択です。**ライセンスの都�
 | 共振の実挙動 | resonance 1（Q=100）でカットオフ周波数にリンギングし 136 dB/秒 で減衰。**理論値と一致**（持続的な自己発振はしない） |
 | LFO | 6波形とも周期誤差 0%、S&H再レンダーはビット一致。設定 5 Hz で明るさが実測 毎秒 5.0 回変化 |
 | wasm サイズ | 28,452 バイト（gzip 9,198 バイト・import 0） |
-| 自動テスト | 38項目すべて PASS |
+| 自動テスト | 41項目すべて PASS |
 
 ## 動かす
 
 必要なもの: Xcode（clang / swiftc）、GNU make、Node.js。WASM を作るなら `brew install llvm lld`。
 
 ```bash
-make test                 # コアの自動テスト38項目
+make test                 # コアの自動テスト41項目
 make cli                  # オフラインレンダラー
 ./build/render-cli --preset presets/m1_unison_saw.txt --events fixtures/m0_events_chord.txt \
     --out build/out.wav --sr 48000 --block 128 --frames 96000

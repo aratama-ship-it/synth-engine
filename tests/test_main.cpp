@@ -769,7 +769,7 @@ static bool test_parameter_sweep() {
             ++renders;
         }
     }
-    const bool ok = renders == 165 && nonFinite == 0 && peak <= 8.0 && synth_engine_version() == 4;
+    const bool ok = renders == 165 && nonFinite == 0 && peak <= 8.0 && synth_engine_version() == 5;
     std::printf("%s 19 parameter sweep: renders=%u nan_inf=%llu peak=%.9f limit=8.000000 version=%u\n",
                 ok ? "PASS" : "FAIL", renders,
                 static_cast<unsigned long long>(nonFinite), peak, synth_engine_version());
@@ -1554,6 +1554,83 @@ static bool test_envelope_curve_health() {
     return ok;
 }
 
+static bool test_m0a_g3_bit_match() {
+    size_t mismatch = 0;
+    const bool loaded = golden_case("presets/m0_saw.txt", "fixtures/m0_events_chord.txt",
+                                    "/tmp/g3_m0.wav", &mismatch);
+    const bool ok = loaded && mismatch == 0;
+    std::printf("%s 39 M0a g3 golden: bit_mismatches=%zu\n",
+                ok ? "PASS" : "FAIL", mismatch);
+    return ok;
+}
+
+static bool test_path_independent_randomness() {
+    static constexpr const char* presets[] = {
+        "presets/m1_unison_saw.txt",
+        "presets/m1b_filter_sweep.txt"
+    };
+    std::vector<TimedEvent> originalEvents;
+    std::vector<TimedEvent> alternateEvents;
+    const bool eventsLoaded =
+        load_timed_event_file("fixtures/au_compare_vel1.txt", originalEvents) &&
+        load_timed_event_file("fixtures/au_compare_vel1_altids.txt", alternateEvents);
+    size_t unisonMismatch = 0;
+    size_t filterMismatch = 0;
+    bool loaded = eventsLoaded;
+    for (uint32_t i = 0; i < 2; ++i) {
+        std::vector<Parameters> parameters;
+        loaded = loaded && load_parameter_file(presets[i], parameters);
+        if (!loaded) break;
+        const StereoRender original = render_stereo(
+            48000, 128, 96000, originalEvents, parameters, 0);
+        const StereoRender alternate = render_stereo(
+            48000, 128, 96000, alternateEvents, parameters, 0);
+        const size_t mismatch = bit_mismatches(original.left, alternate.left) +
+                                bit_mismatches(original.right, alternate.right);
+        if (i == 0) unisonMismatch = mismatch;
+        else filterMismatch = mismatch;
+        loaded = loaded && original.left.size() == 96000 && alternate.left.size() == 96000;
+    }
+    const bool ok = loaded && unisonMismatch == 0 && filterMismatch == 0;
+    std::printf("%s 40 path-independent randomness: unison_bit_mismatches=%zu filter_bit_mismatches=%zu\n",
+                ok ? "PASS" : "FAIL", unisonMismatch, filterMismatch);
+    return ok;
+}
+
+static bool test_m1a_character_preservation() {
+    std::vector<Parameters> parameters;
+    std::vector<TimedEvent> events;
+    const bool inputsLoaded = load_parameter_file("presets/m1_unison_saw.txt", parameters) &&
+                              load_timed_event_file("fixtures/listen_chord.txt", events);
+    const StereoRender before = load_float_stereo_wav("/tmp/g3_m1.wav");
+    const StereoRender after = inputsLoaded
+        ? render_stereo(48000, 128, 96000, events, parameters, 0) : StereoRender{};
+    const double beforeRms = stereo_rms(before, 0, before.left.size());
+    const double afterRms = stereo_rms(after, 0, after.left.size());
+    const double rmsDifferenceDb = 20.0 * std::log10(afterRms / beforeRms);
+    constexpr uint32_t centroidStart = 9600;
+    constexpr uint32_t centroidFftSize = 8192;
+    const double beforeCentroid =
+        (spectral_centroid(before.left, 48000, centroidStart, centroidFftSize) +
+         spectral_centroid(before.right, 48000, centroidStart, centroidFftSize)) * 0.5;
+    const double afterCentroid =
+        (spectral_centroid(after.left, 48000, centroidStart, centroidFftSize) +
+         spectral_centroid(after.right, 48000, centroidStart, centroidFftSize)) * 0.5;
+    const double centroidDifferencePercent =
+        std::fabs(afterCentroid - beforeCentroid) / beforeCentroid * 100.0;
+    const bool loaded = before.left.size() == 96000 && before.right.size() == 96000 &&
+                        after.left.size() == 96000 && after.right.size() == 96000;
+    const bool ok = loaded && std::isfinite(rmsDifferenceDb) &&
+                    std::isfinite(centroidDifferencePercent) &&
+                    std::fabs(rmsDifferenceDb) <= 1.0 && centroidDifferencePercent <= 10.0;
+    std::printf("%s 41 M1a character: before_rms_dbfs=%.6f after_rms_dbfs=%.6f rms_difference_db=%.6f "
+                "before_centroid_hz=%.6f after_centroid_hz=%.6f centroid_difference_percent=%.6f\n",
+                ok ? "PASS" : "FAIL",
+                20.0 * std::log10(beforeRms), 20.0 * std::log10(afterRms), rmsDifferenceDb,
+                beforeCentroid, afterCentroid, centroidDifferencePercent);
+    return ok;
+}
+
 int main() {
     uint32_t passed = 0;
     passed += test_block_invariance();
@@ -1594,6 +1671,9 @@ int main() {
     passed += test_linear_envelope_uniformity();
     passed += test_envelope_curve_monotonicity();
     passed += test_envelope_curve_health();
-    std::printf("SUMMARY passed=%u failed=%u total=38\n", passed, 38u - passed);
-    return passed == 38 ? 0 : 1;
+    passed += test_m0a_g3_bit_match();
+    passed += test_path_independent_randomness();
+    passed += test_m1a_character_preservation();
+    std::printf("SUMMARY passed=%u failed=%u total=41\n", passed, 41u - passed);
+    return passed == 41 ? 0 : 1;
 }

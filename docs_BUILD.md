@@ -38,7 +38,7 @@ core/include/synth_engine.h のC ABIです。
 内蔵wavetableのslotは 0 basic（sine→triangle→saw→squareの4フレーム）、
 1 saw、2 square、3 triangleです。slot 0だけがmorphでフレーム間を移動します。
 
-## パラメータ一覧（engine version 4）
+## パラメータ一覧（engine version 5）
 
 | ID | 名前 | 範囲 | 既定 |
 |---:|---|---:|---:|
@@ -116,7 +116,7 @@ WASM_CLANG が未設定なら成功扱いでskipを表示します。LLVM clang�
 
     WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang make wasm
 
-## テスト38項目
+## テスト41項目
 
 tests/test_main.cpp はフレームワークを使わず、次を測定します。
 
@@ -141,7 +141,7 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 19. 全55パラメータのmin/default/maxスイープ
 20. 16音・両OSC 4 unison・サブ・ノイズの処理時間
 21. M1a全構成のblock 1/7/64/128/511ビット一致
-22. M0 saw／M1 unisonの変更前ゴールデンWAVとのビット一致
+22. M0 saw／M1 unisonの基準WAVとのビット一致
 23. LP12の200／1000／5000 Hzにおける−3 dB点
 24. LP12／LP24の阻止帯域スロープ
 25. resonance 0.8のカットオフ付近のピーク差
@@ -158,6 +158,9 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 36. 直線フィルタEGのディケイ25%／50%／75%時点での実測値
 37. curve 0／0.5／1でエンベロープが0.5へ落ちる時刻の単調増加
 38. curve、decay、releaseの全80組合せでNaN／Inf、振幅上限、リリース後のボイス解放
+39. M0a sawをM1b-3基準WAV `/tmp/g3_m0.wav` と比較したビット一致
+40. 同じ演奏のイベントIDだけを変更したM1 unison／M1b filter sweepのビット一致
+41. M1 unisonの変更前後におけるRMS差1 dB以内／スペクトル重心差10%以内
 
 エイリアス測定は4-term Blackman-Harris窓を使い、基音電力に対する「基音より上、かつ
 期待される第1〜4倍音の各±10 binを除いた電力」の比です。MIDI 108では選択される
@@ -171,6 +174,8 @@ mipの倍音上限が4のため、この4倍音を期待成分とします。
 - B→A位相変調は全開で2 cycle
 - ピンクノイズは20 Hz / 200 Hz / 2 kHzの1極LPFを1.0 / 0.32 / 0.10で加算
 - パラメータ範囲外はclamp、NaNと未知IDはエラー
+- 乱数ハッシュの入力には、シェル固有のイベントIDではなく、同じイベント列から再現できる
+  startOrderなどの経路非依存な値だけを使う
 
 ## M1bで確定した事項
 
@@ -190,8 +195,8 @@ SPECにないため、以下は公開仕様として確定していません。�
 
 - SYNTH_EV_MACRO の割当先（イベント順序には参加するがM0aでは音声変化なし）
 - 未知のイベントkindの扱い（音声変化なし）
-- OSC Aが1 unisonかつM1a音源がすべて無効なときのphaseMode=0の扱い
-  （M0aビット互換を優先して0.25 cycle開始。ユニゾン使用時は仕様どおりhash開始）
+- OSC Aが1 unisonかつM1a音源がすべて無効なときのphaseMode=0は、M0aビット互換のため
+  0.25 cycle開始を維持する。ユニゾン使用時は経路非依存なstartOrderを使ったhash開始とする
 - 発音中にunison数、phaseMode、固定phaseを変更した場合の位相再初期化規則
   （現在は再初期化せず、ノートオン時に用意した各位相を継続）
 - 発音中にnoiseLevelを0から上げた場合のpink LPF履歴

@@ -26,7 +26,9 @@ for (const line of fs.readFileSync(presetPath, "utf8").split("\n")) {
   const [id, v] = t.split("="); const rc = ex.synth_set_param(engine, Number(id), Number(v));
   if (rc < 0) throw new Error("set_param failed " + t);
 }
-ex.synth_reset(engine, 0, 1n);
+// render-cli は synth_create のあと reset を呼ばない（seed は 0 のまま）。
+// ここで別の seed で reset すると位相ハッシュが変わり、native と一致しなくなる
+// （2026-09-05 に seed=1 のまま比較して差が出ていた。スクリプト側の誤り）。
 const events = [];
 for (const line of fs.readFileSync(eventsPath, "utf8").split("\n")) {
   const t = line.trim(); if (!t || t.startsWith("#")) continue;
