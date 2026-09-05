@@ -14,7 +14,8 @@ enum SynthEventKind {
     SYNTH_EV_NOTE_ON = 1,
     SYNTH_EV_NOTE_OFF = 2,
     SYNTH_EV_PARAM = 3,
-    SYNTH_EV_MACRO = 4
+    SYNTH_EV_MACRO = 4,
+    SYNTH_EV_VOICE_PARAM = 5
 };
 
 typedef struct {
@@ -61,6 +62,9 @@ int synth_load_wavetable(SynthEngine* engine, uint32_t slot, const float* frames
 void synth_reset(SynthEngine* engine, uint32_t kind, uint64_t seed);
 int synth_process(SynthEngine* engine, const SynthEvent* events, uint32_t nEvents,
                   float* outL, float* outR, uint32_t nFrames);
+int synth_process_send(SynthEngine* engine, const SynthEvent* events, uint32_t nEvents,
+                       float* outL, float* outR, float* sendL, float* sendR,
+                       uint32_t nFrames);
 uint32_t synth_get_tail_frames(const SynthEngine* engine);
 uint32_t synth_engine_version(void);
 

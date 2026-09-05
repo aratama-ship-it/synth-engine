@@ -9,6 +9,7 @@ namespace synth {
 
 constexpr uint32_t kVoiceCapacity = 16;
 constexpr uint32_t kMaxUnison = 4;
+constexpr uint32_t kVoiceParamCount = 22;
 
 enum EnvelopeStage : uint32_t {
     kEnvOff = 0,
@@ -52,6 +53,8 @@ struct Voice {
     double lfoPhase;
     uint64_t lfoCycleIndex;
     float lfoHold;
+    uint32_t voiceParamMask;
+    float voiceParams[kVoiceParamCount];
 };
 
 }  // namespace synth
@@ -72,6 +75,8 @@ struct SynthEngine {
     uint64_t globalLfoCycleIndex;
     float globalLfoHold;
     float params[synth::kParamCount];
+    uint32_t pendingVoiceParamMask;
+    float pendingVoiceParams[synth::kVoiceParamCount];
     synth::Voice voices[synth::kVoiceCapacity];
     synth::WavetableBank wavetable;
 };

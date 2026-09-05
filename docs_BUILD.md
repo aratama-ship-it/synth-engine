@@ -1,8 +1,9 @@
-# Synth Engine M1c
+# Synth Engine M3a
 
 SPEC_M0a.md の縦切りスパイクに、SPEC_M1a.md のWT OSC A/B、ユニゾン、B→A位相変調、
-サブ、ノイズ、SPEC_M1b.mdのTPT/ZDF SVF、フィルタEG、LFO、および
-SPEC_M1c.mdの6スロット・モジュレーションマトリクスとマクロ2本を追加した実装です。
+サブ、ノイズ、SPEC_M1b.mdのTPT/ZDF SVF、フィルタEG、LFO、
+SPEC_M1c.mdの6スロット・モジュレーションマトリクスとマクロ2本、および
+SPEC_M3a.mdの音符単位パラメータ上書きとセンド出力を追加した実装です。
 第三者コードや外部ライブラリを含まず、DSPコアは
 C++標準ライブラリ、動的確保、例外、RTTI、ロックを使いません。公開面は
 core/include/synth_engine.h のC ABIです。
@@ -30,6 +31,26 @@ core/include/synth_engine.h のC ABIです。
 生成物はすべて build/ 配下に置かれます。CLIは32-bit float、ステレオのWAVを出力し、
 標準出力に peak_dbfs、rms_dbfs、nan_count を表示します。
 
+## ゴールデンハッシュと更新手順
+
+ビット一致テストのゴールデンは外部WAVではなく、`tests/test_main.cpp` 内の64-bit
+FNV-1a定数です。96,000フレームの左右PCMをL、Rの順にインターリーブし、各`float`の
+32-bit表現をlittle-endianの4 byteとしてハッシュします。WAVヘッダは対象に含めません。
+テスト41で従来の基準WAVから求めていたRMSとスペクトル重心も同ファイル内の定数です。
+
+`-ffp-contract=off` は必須です。`Makefile`の`CXXFLAGS`と
+`shells/apple/build.sh`の4つのC++コンパイル指定から削除しないでください。FMAを許可すると
+ネイティブとwasmで丸めが変わり、ゴールデンハッシュも一致しなくなります。
+
+DSPを意図して変更し、ゴールデンを更新する場合は次の順で行います。
+
+1. `-ffp-contract=off`を維持した現在のビルドで`make test`を実行する。
+2. 失敗行の`expected=0x...`と`got=0x...`を確認し、対象プリセットとフィクスチャが
+   変わっていないことを確認する。
+3. 意図した音声変更だけであることを確認してから、該当する`kGolden...Hash`を`got`へ更新する。
+4. 変更内容とハッシュ更新をcommitメッセージへ記録し、`make test`、
+   `make core-freestanding-check`、`make wasm WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang`を再実行する。
+
 ## 入力形式
 
 プリセットは1行に paramId=value、イベントは1行に frame kind id a b を書きます。
@@ -39,7 +60,7 @@ core/include/synth_engine.h のC ABIです。
 内蔵wavetableのslotは 0 basic（sine→triangle→saw→squareの4フレーム）、
 1 saw、2 square、3 triangleです。slot 0だけがmorphでフレーム間を移動します。
 
-## パラメータ一覧（engine version 6）
+## パラメータ一覧（engine version 7）
 
 | ID | 名前 | 範囲 | 既定 |
 |---:|---|---:|---:|
@@ -118,6 +139,7 @@ core/include/synth_engine.h のC ABIです。
 | 72 | modSlot5Amount | -1..1 | 0 |
 | 73 | macro1 | 0..1 | 0 |
 | 74 | macro2 | 0..1 | 0 |
+| 75 | sendLevel | 0..1 | 0 |
 
 filterModeは0=LP12、1=BP12、2=HP12、3=Notch、4=LP24、5=HP24です。
 lfoShapeは0=sine、1=triangle、2=saw上行、3=saw下行、4=square、5=S&Hです。
@@ -141,6 +163,23 @@ LFO Rateだけは全ボイス共通で、ボイス0のSource値を評価した�
 指定offsetから反映します。未知idは無視件数へ加算します。パラメータ73/74とイベントの
 どちらから設定しても5 ms時定数の一次スムーサを通り、create/reset時は目標値へスナップします。
 
+`SYNTH_EV_VOICE_PARAM`（kind 5）は、`id`でパラメータ、`a`で値を指定し、次に処理される
+NOTE_ONの1音だけへ適用します。同一offsetはNOTE_OFF、PARAM/MACRO、VOICE_PARAM、NOTE_ONの
+順で処理します。複数のVOICE_PARAMは1音へまとめて適用でき、NOTE_ONを1つ処理した時点で
+待機中の全上書きを消費します。NOTE_ONがないブロックでは次ブロックへ持ち越します。
+値は通常パラメータと同じ範囲へクランプし、NaNまたは許可外IDは適用せず無視件数へ加算します。
+
+上書き許可IDは、1 oscAMorph、2 oscALevel、3 ampAttack、4 ampDecay、5 ampSustain、
+6 ampRelease、18 oscBMorph、19 oscBLevel、28 fmBToA、29 subLevel、32 noiseLevel、
+34 noiseDecay、36 filterMode、37 filterCutoff、38 filterResonance、40 filterEnvAmount、
+41 filterEgAttack、42 filterEgDecay、43 filterEgSustain、44 filterEgRelease、
+54 filterEgCurve、75 sendLevelの22個です。上書きされていない値は発音中も毎サンプル
+グローバルパラメータを参照するため、グローバル変更が既存ボイスへ効く従来挙動を維持します。
+
+`synth_process_send`はドライの左右出力に加え、`sendL`/`sendR`へセンドを書きます。
+各ボイスのフィルタ通過後・アンプEG適用後の信号へsendLevelを掛けて加算し、
+マスターゲインは通しません。`synth_process`は両センドポインタをNULLで呼ぶ薄いラッパです。
+
 ## WASM
 
 WASM_CLANG が未設定なら成功扱いでskipを表示します。LLVM clangのパスを指定する一般形:
@@ -151,7 +190,7 @@ WASM_CLANG が未設定なら成功扱いでskipを表示します。LLVM clang�
 
     WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang make wasm
 
-## テスト48項目
+## テスト57項目
 
 tests/test_main.cpp はフレームワークを使わず、次を測定します。
 
@@ -173,10 +212,10 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 16. サブの周波数ピーク
 17. ノイズ減衰とseed決定論
 18. 100 Hz〜10 kHzのピンクノイズ傾斜
-19. 全75パラメータのmin/default/maxスイープ
+19. 全76パラメータのmin/default/maxスイープ
 20. 16音・両OSC 4 unison・サブ・ノイズの処理時間
 21. M1a全構成のblock 1/7/64/128/511ビット一致
-22. M0 saw／M1 unisonの基準WAVとのビット一致
+22. M0 saw／M1 unisonのゴールデンハッシュ一致
 23. LP12の200／1000／5000 Hzにおける−3 dB点
 24. LP12／LP24の阻止帯域スロープ
 25. resonance 0.8のカットオフ付近のピーク差
@@ -189,20 +228,30 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 32. フィルタ＋LFO有効時のblock 1/7/64/128/511ビット一致
 33. 全M1b機能有効時のreset後レンダー決定論
 34. LP24・LFO・16音×unison 4の平均／p99処理時間と期限判定
-35. curve=0を明示したM0 saw／M1 unisonの基準WAVとのビット一致、および75パラメータのメタデータ
+35. curve=0を明示したM0 saw／M1 unisonのゴールデンハッシュ一致、および76パラメータのメタデータ
 36. 直線フィルタEGのディケイ25%／50%／75%時点での実測値
 37. curve 0／0.5／1でエンベロープが0.5へ落ちる時刻の単調増加
 38. curve、decay、releaseの全80組合せでNaN／Inf、振幅上限、リリース後のボイス解放
-39. M0a sawをM1b-3基準WAV `/tmp/g3_m0.wav` と比較したビット一致
+39. M0a sawのM1b-3ゴールデンハッシュ一致
 40. 同じ演奏のイベントIDだけを変更したM1 unison／M1b filter sweepのビット一致
 41. M1 unisonの変更前後におけるRMS差1 dB以内／スペクトル重心差10%以内
-42. 全スロット無効時のM0 saw／M1 unison／M1b filter sweepとG4基準WAVのビット一致
+42. 全スロット無効時のM0 saw／M1 unison／M1b filter sweepとG4ゴールデンハッシュの一致
 43. LFO／アンプEG／フィルタEG／ベロシティ／ノート位置／macro1／macro2の7信号源
 44. 13送り先それぞれのRMS差1 dB以上またはスペクトル重心差5%以上
 45. Filter Cutoffへ同量を2スロットから送ったときの変化幅が1スロット時の2倍±20%
 46. frame 24000のmacroイベント、5 msスムーサ、未知macro idの無視件数
 47. 6スロット有効時のblock 1／7／64／128／511ビット一致とreset後の再レンダー一致
 48. 6スロット・LP24・LFO・16音×unison 4の平均／p99処理時間と期限判定
+49. サブオシレータを+1 octaveにしたときの周波数ピーク
+50. M0／M1／M1b／M1cのG6ゴールデンハッシュと、VOICE_PARAMなし・sendLevel 0の出力の一致
+51. 2音目だけfilterCutoffを4000 Hzへ上書きしたときのスペクトル重心比
+52. 3音目で上書きが残らず、1音目のスペクトル重心へ戻ること
+53. 許可外IDとNaNのVOICE_PARAMの無視件数、および16ボイス上限の維持
+54. sendLevel 0の完全無音と、0.5時のドライに対するサンプル単位の振幅比
+55. 2音目だけsendLevelを上書きしたとき、センドへその音だけが現れること
+56. VOICE_PARAMとセンド有効時のblock 1／7／64／128／511ビット一致、ブロック越しの
+    待機上書き、およびreset後の再レンダー一致
+57. 16音×unison 4・LP24・6スロット・16ボイス上書き時の平均／p99処理時間と期限判定
 
 エイリアス測定は4-term Blackman-Harris窓を使い、基音電力に対する「基音より上、かつ
 期待される第1〜4倍音の各±10 binを除いた電力」の比です。MIDI 108では選択される
@@ -238,13 +287,33 @@ mipの倍音上限が4のため、この4倍音を期待成分とします。
 - 同じ送り先の全寄与を合算した後に1回だけクランプする
 - 評価はサンプルごと・ボイスごと。LFO Rateだけはボイス0の評価を全ボイスで共有する
 - マクロ2本はパラメータ73/74または`SYNTH_EV_MACRO` id 0/1から設定し、5 msで平滑化する
-- 全スロット無効時は既存M0／M1a／M1bの信号経路を維持し、G4基準WAVとビット一致する
+- 全スロット無効時は既存M0／M1a／M1bの信号経路を維持し、G4ゴールデンハッシュと一致する
+
+## M3aで確定した事項
+
+- ボイス上書きは固定長22値と32-bitマスクで保持し、動的確保を使わない
+- VOICE_PARAMなし・sendLevel 0では既存のドライ信号経路を維持し、G6ゴールデンハッシュと一致する
+- センドはボイスのフィルタ後・アンプEG後から分岐し、マスターゲインを通さない
+- `synth_process`のシグネチャは維持し、`synth_process_send`へセンドNULLで委譲する
 
 ## 未決事項
 
 SPECにないため、以下は公開仕様として確定していません。括弧内は現在の挙動です。
 
 - 未知のイベントkindの扱い（音声変化なし）
+- 同じパラメータIDのVOICE_PARAMを1つのNOTE_ON前に複数受けた場合の優先規則
+  （現在は処理順で最後の値を使う）
+- 同一offsetにNOTE_ONが複数ある場合、待機中VOICE_PARAMを受け取るNOTE_ONの選択規則
+  （現在は入力イベント配列で最初のNOTE_ONが受け取り、その時点で全上書きを消費する）
+- reset時の待機中VOICE_PARAMの保持規則
+  （現在はSYNTH_RESET_VOICESとSYNTH_RESET_ALLのどちらでも待機中上書きを消去する）
+- ボイス上書きしたfilterCutoff/filterResonanceのスムージング規則
+  （現在は上書き値を直接使い、未上書き時だけ従来のグローバル5 msスムーサを使う）
+- `synth_process_send`でsendL/sendRの片方だけがNULLの場合の扱い
+  （現在は非NULL側だけを書き、NULL側を破棄する）
+- sendLevelのパラメータflags（現在はゲイン量として`SYNTH_PARAM_FLAG_GAIN`を付ける）
+- ボイス上書きしたampReleaseと`synth_get_tail_frames`の関係
+  （現在は従来どおりグローバルampReleaseだけからtail framesを返す）
 - OSC Aが1 unisonかつM1a音源がすべて無効なときのphaseMode=0は、M0aビット互換のため
   0.25 cycle開始を維持する。ユニゾン使用時は経路非依存なstartOrderを使ったhash開始とする
 - 発音中にunison数、phaseMode、固定phaseを変更した場合の位相再初期化規則

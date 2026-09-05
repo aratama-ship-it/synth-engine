@@ -104,6 +104,52 @@ static StereoRender render_stereo(uint32_t sampleRate, uint32_t block, uint64_t 
     return output;
 }
 
+struct SendRender {
+    std::vector<float> left;
+    std::vector<float> right;
+    std::vector<float> sendLeft;
+    std::vector<float> sendRight;
+};
+
+static SendRender render_send(uint32_t sampleRate, uint32_t block, uint64_t frameCount,
+                              const std::vector<TimedEvent>& events,
+                              const std::vector<Parameters>& parameters, uint64_t seed) {
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), sampleRate, block);
+    if (engine == nullptr) return {};
+    for (const Parameters& parameter : parameters) {
+        if (synth_set_param(engine, parameter.id, parameter.value) != 0) return {};
+    }
+    synth_reset(engine, SYNTH_RESET_VOICES, seed);
+    SendRender output{
+        std::vector<float>(frameCount), std::vector<float>(frameCount),
+        std::vector<float>(frameCount), std::vector<float>(frameCount)
+    };
+    std::vector<SynthEvent> blockEvents;
+    uint64_t position = 0;
+    while (position < frameCount) {
+        const uint32_t count = static_cast<uint32_t>(
+            std::min<uint64_t>(block, frameCount - position));
+        blockEvents.clear();
+        for (const TimedEvent& event : events) {
+            if (event.frame >= position && event.frame < position + count) {
+                blockEvents.push_back(SynthEvent{
+                    static_cast<uint32_t>(event.frame - position), event.kind, event.id,
+                    event.a, event.b
+                });
+            }
+        }
+        const int result = synth_process_send(engine,
+            blockEvents.empty() ? nullptr : blockEvents.data(),
+            static_cast<uint32_t>(blockEvents.size()), output.left.data() + position,
+            output.right.data() + position, output.sendLeft.data() + position,
+            output.sendRight.data() + position, count);
+        if (result != 0) return {};
+        position += count;
+    }
+    return output;
+}
+
 static size_t bit_mismatches(const std::vector<float>& a, const std::vector<float>& b) {
     if (a.size() != b.size()) return std::max(a.size(), b.size());
     size_t mismatches = 0;
@@ -112,6 +158,32 @@ static size_t bit_mismatches(const std::vector<float>& a, const std::vector<floa
     }
     return mismatches;
 }
+
+static uint64_t fnv1a64_pcm_stereo(const StereoRender& output) {
+    uint64_t hash = UINT64_C(14695981039346656037);
+    constexpr uint64_t prime = UINT64_C(1099511628211);
+    if (output.left.size() != output.right.size()) return 0;
+    for (size_t frame = 0; frame < output.left.size(); ++frame) {
+        const float samples[] = {output.left[frame], output.right[frame]};
+        for (float sample : samples) {
+            uint32_t bits = 0;
+            std::memcpy(&bits, &sample, sizeof(bits));
+            for (uint32_t byte = 0; byte < sizeof(bits); ++byte) {
+                hash ^= static_cast<unsigned char>(bits >> (byte * 8u));
+                hash *= prime;
+            }
+        }
+    }
+    return hash;
+}
+
+// この値は `-ffp-contract=off` を付けた状態のもの。コンパイル指定や DSP を変えると当然変わる。
+// 意図した変更なら、変更内容を commit メッセージに書いたうえでこの値を更新する。
+static constexpr uint64_t kGoldenM0ChordHash = UINT64_C(0xfa4784bb6553b535);
+static constexpr uint64_t kGoldenM1ListenChordHash = UINT64_C(0x7ff4dcd69776c37e);
+static constexpr uint64_t kGoldenM1ChordHash = UINT64_C(0x92e5ccb9589b59ef);
+static constexpr uint64_t kGoldenM1bChordHash = UINT64_C(0x2ebfef2c5e4a2491);
+static constexpr uint64_t kGoldenM1cChordHash = UINT64_C(0x968d90cecb2ef559);
 
 static bool test_block_invariance() {
     const std::vector<TimedEvent> events = {
@@ -744,7 +816,7 @@ static bool test_pink_noise_slope() {
 }
 
 static bool test_parameter_sweep() {
-    static constexpr float values[75][3] = {
+    static constexpr float values[76][3] = {
         {0.0f, 0.0f, 3.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.8f, 4.0f},
         {0.0f, 0.005f, 60.0f}, {0.0f, 0.1f, 60.0f}, {0.0f, 0.8f, 1.0f},
         {0.0f, 0.2f, 60.0f}, {0.0f, 0.2f, 4.0f}, {1.0f, 16.0f, 16.0f},
@@ -770,12 +842,12 @@ static bool test_parameter_sweep() {
         {0.0f, 0.0f, 7.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
         {0.0f, 0.0f, 7.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
         {0.0f, 0.0f, 7.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}
+        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}
     };
     uint64_t nonFinite = 0;
     double peak = 0.0;
     uint32_t renders = 0;
-    for (uint32_t id = 0; id < 75; ++id) {
+    for (uint32_t id = 0; id < 76; ++id) {
         for (uint32_t choice = 0; choice < 3; ++choice) {
             std::vector<Parameters> params = {
                 {3, 0.0f}, {4, 0.0f}, {5, 1.0f}, {6, 0.01f}, {7, 0.2f},
@@ -795,7 +867,7 @@ static bool test_parameter_sweep() {
             ++renders;
         }
     }
-    const bool ok = renders == 225 && nonFinite == 0 && peak <= 8.0 && synth_engine_version() == 6;
+    const bool ok = renders == 228 && nonFinite == 0 && peak <= 8.0 && synth_engine_version() == 7;
     std::printf("%s 19 parameter sweep: renders=%u nan_inf=%llu peak=%.9f limit=8.000000 version=%u\n",
                 ok ? "PASS" : "FAIL", renders,
                 static_cast<unsigned long long>(nonFinite), peak, synth_engine_version());
@@ -904,63 +976,39 @@ static bool load_timed_event_file(const char* path, std::vector<TimedEvent>& eve
     return input.eof();
 }
 
-static uint32_t read_le_u32(const unsigned char* bytes) {
-    return static_cast<uint32_t>(bytes[0]) |
-        (static_cast<uint32_t>(bytes[1]) << 8) |
-        (static_cast<uint32_t>(bytes[2]) << 16) |
-        (static_cast<uint32_t>(bytes[3]) << 24);
-}
+struct GoldenHashResult {
+    bool rendered;
+    uint64_t got;
+};
 
-static StereoRender load_float_stereo_wav(const char* path) {
-    std::ifstream input(path, std::ios::binary);
-    unsigned char header[44]{};
-    input.read(reinterpret_cast<char*>(header), sizeof(header));
-    if (!input || std::memcmp(header, "RIFF", 4) != 0 ||
-        std::memcmp(header + 8, "WAVEfmt ", 8) != 0 ||
-        std::memcmp(header + 36, "data", 4) != 0 ||
-        header[20] != 3 || header[22] != 2 || header[34] != 32) return {};
-    const uint32_t dataBytes = read_le_u32(header + 40);
-    if ((dataBytes & 7u) != 0) return {};
-    const size_t frames = dataBytes / 8u;
-    StereoRender output{std::vector<float>(frames), std::vector<float>(frames)};
-    unsigned char sampleBytes[8]{};
-    for (size_t i = 0; i < frames; ++i) {
-        input.read(reinterpret_cast<char*>(sampleBytes), sizeof(sampleBytes));
-        if (!input) return {};
-        uint32_t bits = read_le_u32(sampleBytes);
-        std::memcpy(&output.left[i], &bits, sizeof(bits));
-        bits = read_le_u32(sampleBytes + 4);
-        std::memcpy(&output.right[i], &bits, sizeof(bits));
-    }
-    return output;
-}
-
-static bool golden_case(const char* presetPath, const char* eventPath,
-                        const char* goldenPath, size_t* mismatches,
-                        bool explicitCurveZero = false, bool resetVoices = true) {
+static GoldenHashResult golden_case(const char* presetPath, const char* eventPath,
+                                    bool explicitCurveZero = false,
+                                    bool resetVoices = true) {
     std::vector<Parameters> parameters;
     std::vector<TimedEvent> events;
     if (!load_parameter_file(presetPath, parameters) ||
-        !load_timed_event_file(eventPath, events)) return false;
+        !load_timed_event_file(eventPath, events)) return {};
     if (explicitCurveZero) parameters.insert(parameters.end(), {{53, 0.0f}, {54, 0.0f}});
     const StereoRender rendered = render_stereo(
         48000, 128, 96000, events, parameters, 0, resetVoices);
-    const StereoRender golden = load_float_stereo_wav(goldenPath);
-    *mismatches += bit_mismatches(rendered.left, golden.left);
-    *mismatches += bit_mismatches(rendered.right, golden.right);
-    return rendered.left.size() == 96000 && golden.left.size() == 96000;
+    return {rendered.left.size() == 96000 && rendered.right.size() == 96000,
+            fnv1a64_pcm_stereo(rendered)};
 }
 
 static bool test_m1b_bypass_golden() {
-    size_t sawMismatch = 0;
-    size_t unisonMismatch = 0;
-    const bool sawLoaded = golden_case("presets/m0_saw.txt", "fixtures/m0_events_chord.txt",
-        "/tmp/golden_m0_saw.wav", &sawMismatch);
-    const bool unisonLoaded = golden_case("presets/m1_unison_saw.txt", "fixtures/listen_chord.txt",
-        "/tmp/golden_m1_unison.wav", &unisonMismatch);
-    const bool ok = sawLoaded && unisonLoaded && sawMismatch == 0 && unisonMismatch == 0;
-    std::printf("%s 22 M1b bypass golden: m0_saw_bit_mismatches=%zu m1_unison_bit_mismatches=%zu\n",
-                ok ? "PASS" : "FAIL", sawMismatch, unisonMismatch);
+    const GoldenHashResult saw =
+        golden_case("presets/m0_saw.txt", "fixtures/m0_events_chord.txt");
+    const GoldenHashResult unison =
+        golden_case("presets/m1_unison_saw.txt", "fixtures/listen_chord.txt");
+    const bool ok = saw.rendered && unison.rendered && saw.got == kGoldenM0ChordHash &&
+                    unison.got == kGoldenM1ListenChordHash;
+    std::printf("%s 22 M1b bypass golden: m0_saw_expected=0x%016llx got=0x%016llx "
+                "m1_unison_expected=0x%016llx got=0x%016llx\n",
+                ok ? "PASS" : "FAIL",
+                static_cast<unsigned long long>(kGoldenM0ChordHash),
+                static_cast<unsigned long long>(saw.got),
+                static_cast<unsigned long long>(kGoldenM1ListenChordHash),
+                static_cast<unsigned long long>(unison.got));
     return ok;
 }
 
@@ -1387,7 +1435,7 @@ static bool test_m1b_performance() {
 static bool test_curve_zero_golden_and_metadata() {
     const uint32_t count = synth_param_count();
     std::vector<SynthParamInfo> parameters(count);
-    bool metadataValid = count == 75;
+    bool metadataValid = count == 76;
     for (uint32_t id = 0; id < count; ++id) {
         SynthParamInfo& parameter = parameters[id];
         metadataValid = metadataValid && synth_param_info(id, &parameter) == 0;
@@ -1421,16 +1469,20 @@ static bool test_curve_zero_golden_and_metadata() {
             defaultsMatch = defaultsMatch && engine->params[id] == parameters[id].defaultValue;
     }
 
-    size_t sawMismatch = 0;
-    size_t unisonMismatch = 0;
-    const bool sawLoaded = golden_case("presets/m0_saw.txt", "fixtures/m0_events_chord.txt",
-        "/tmp/g2_m0.wav", &sawMismatch, true);
-    const bool unisonLoaded = golden_case("presets/m1_unison_saw.txt", "fixtures/listen_chord.txt",
-        "/tmp/g2_m1.wav", &unisonMismatch, true);
-    const bool ok = metadataValid && boundsValid && defaultsMatch && sawLoaded && unisonLoaded &&
-                    sawMismatch == 0 && unisonMismatch == 0;
-    std::printf("%s 35 curve 0 golden: m0_mismatches=%zu m1_mismatches=%zu params=%u metadata=%s\n",
-                ok ? "PASS" : "FAIL", sawMismatch, unisonMismatch, count,
+    const GoldenHashResult saw =
+        golden_case("presets/m0_saw.txt", "fixtures/m0_events_chord.txt", true);
+    const GoldenHashResult unison =
+        golden_case("presets/m1_unison_saw.txt", "fixtures/listen_chord.txt", true);
+    const bool ok = metadataValid && boundsValid && defaultsMatch && saw.rendered &&
+                    unison.rendered && saw.got == kGoldenM0ChordHash &&
+                    unison.got == kGoldenM1ListenChordHash;
+    std::printf("%s 35 curve 0 golden: m0_expected=0x%016llx got=0x%016llx "
+                "m1_expected=0x%016llx got=0x%016llx params=%u metadata=%s\n",
+                ok ? "PASS" : "FAIL",
+                static_cast<unsigned long long>(kGoldenM0ChordHash),
+                static_cast<unsigned long long>(saw.got),
+                static_cast<unsigned long long>(kGoldenM1ListenChordHash),
+                static_cast<unsigned long long>(unison.got), count,
                 metadataValid && defaultsMatch ? "valid" : "invalid");
     return ok;
 }
@@ -1582,12 +1634,13 @@ static bool test_envelope_curve_health() {
 }
 
 static bool test_m0a_g3_bit_match() {
-    size_t mismatch = 0;
-    const bool loaded = golden_case("presets/m0_saw.txt", "fixtures/m0_events_chord.txt",
-                                    "/tmp/g3_m0.wav", &mismatch);
-    const bool ok = loaded && mismatch == 0;
-    std::printf("%s 39 M0a g3 golden: bit_mismatches=%zu\n",
-                ok ? "PASS" : "FAIL", mismatch);
+    const GoldenHashResult result =
+        golden_case("presets/m0_saw.txt", "fixtures/m0_events_chord.txt");
+    const bool ok = result.rendered && result.got == kGoldenM0ChordHash;
+    std::printf("%s 39 M0a g3 golden: expected=0x%016llx got=0x%016llx\n",
+                ok ? "PASS" : "FAIL",
+                static_cast<unsigned long long>(kGoldenM0ChordHash),
+                static_cast<unsigned long long>(result.got));
     return ok;
 }
 
@@ -1629,24 +1682,20 @@ static bool test_m1a_character_preservation() {
     std::vector<TimedEvent> events;
     const bool inputsLoaded = load_parameter_file("presets/m1_unison_saw.txt", parameters) &&
                               load_timed_event_file("fixtures/listen_chord.txt", events);
-    const StereoRender before = load_float_stereo_wav("/tmp/g3_m1.wav");
     const StereoRender after = inputsLoaded
         ? render_stereo(48000, 128, 96000, events, parameters, 0) : StereoRender{};
-    const double beforeRms = stereo_rms(before, 0, before.left.size());
+    constexpr double beforeRms = 0.078162945748398369;
     const double afterRms = stereo_rms(after, 0, after.left.size());
     const double rmsDifferenceDb = 20.0 * std::log10(afterRms / beforeRms);
     constexpr uint32_t centroidStart = 9600;
     constexpr uint32_t centroidFftSize = 8192;
-    const double beforeCentroid =
-        (spectral_centroid(before.left, 48000, centroidStart, centroidFftSize) +
-         spectral_centroid(before.right, 48000, centroidStart, centroidFftSize)) * 0.5;
+    constexpr double beforeCentroid = 4355.7321732163437;
     const double afterCentroid =
         (spectral_centroid(after.left, 48000, centroidStart, centroidFftSize) +
          spectral_centroid(after.right, 48000, centroidStart, centroidFftSize)) * 0.5;
     const double centroidDifferencePercent =
         std::fabs(afterCentroid - beforeCentroid) / beforeCentroid * 100.0;
-    const bool loaded = before.left.size() == 96000 && before.right.size() == 96000 &&
-                        after.left.size() == 96000 && after.right.size() == 96000;
+    const bool loaded = after.left.size() == 96000 && after.right.size() == 96000;
     const bool ok = loaded && std::isfinite(rmsDifferenceDb) &&
                     std::isfinite(centroidDifferencePercent) &&
                     std::fabs(rmsDifferenceDb) <= 1.0 && centroidDifferencePercent <= 10.0;
@@ -1689,19 +1738,25 @@ static double rms_difference_db(const StereoRender& changed, const StereoRender&
 }
 
 static bool test_m1c_bypass_golden() {
-    size_t m0Mismatch = 0;
-    size_t m1Mismatch = 0;
-    size_t m1bMismatch = 0;
-    const bool loaded =
-        golden_case("presets/m0_saw.txt", "fixtures/m0_events_chord.txt",
-                    "/tmp/g4_m0_saw.wav", &m0Mismatch, false, false) &&
-        golden_case("presets/m1_unison_saw.txt", "fixtures/m0_events_chord.txt",
-                    "/tmp/g4_m1_unison_saw.wav", &m1Mismatch, false, false) &&
-        golden_case("presets/m1b_filter_sweep.txt", "fixtures/m0_events_chord.txt",
-                    "/tmp/g4_m1b_filter_sweep.wav", &m1bMismatch, false, false);
-    const bool ok = loaded && m0Mismatch == 0 && m1Mismatch == 0 && m1bMismatch == 0;
-    std::printf("%s 42 M1c bypass golden: m0=%zu m1=%zu m1b=%zu bit_mismatches\n",
-                ok ? "PASS" : "FAIL", m0Mismatch, m1Mismatch, m1bMismatch);
+    const GoldenHashResult m0 =
+        golden_case("presets/m0_saw.txt", "fixtures/m0_events_chord.txt", false, false);
+    const GoldenHashResult m1 =
+        golden_case("presets/m1_unison_saw.txt", "fixtures/m0_events_chord.txt", false, false);
+    const GoldenHashResult m1b =
+        golden_case("presets/m1b_filter_sweep.txt", "fixtures/m0_events_chord.txt", false, false);
+    const bool ok = m0.rendered && m1.rendered && m1b.rendered &&
+                    m0.got == kGoldenM0ChordHash && m1.got == kGoldenM1ChordHash &&
+                    m1b.got == kGoldenM1bChordHash;
+    std::printf("%s 42 M1c bypass golden: m0_expected=0x%016llx got=0x%016llx "
+                "m1_expected=0x%016llx got=0x%016llx "
+                "m1b_expected=0x%016llx got=0x%016llx\n",
+                ok ? "PASS" : "FAIL",
+                static_cast<unsigned long long>(kGoldenM0ChordHash),
+                static_cast<unsigned long long>(m0.got),
+                static_cast<unsigned long long>(kGoldenM1ChordHash),
+                static_cast<unsigned long long>(m1.got),
+                static_cast<unsigned long long>(kGoldenM1bChordHash),
+                static_cast<unsigned long long>(m1b.got));
     return ok;
 }
 
@@ -2027,6 +2082,297 @@ static bool test_m1c_performance() {
     return ok;
 }
 
+static bool test_m3a_bypass_golden() {
+    const GoldenHashResult m0 =
+        golden_case("presets/m0_saw.txt", "fixtures/m0_events_chord.txt", false, false);
+    const GoldenHashResult m1 =
+        golden_case("presets/m1_unison_saw.txt", "fixtures/m0_events_chord.txt", false, false);
+    const GoldenHashResult m1b =
+        golden_case("presets/m1b_filter_sweep.txt", "fixtures/m0_events_chord.txt", false, false);
+    const GoldenHashResult m1c =
+        golden_case("presets/m1c_macro_morph.txt", "fixtures/m0_events_chord.txt", false, false);
+    const bool ok = m0.rendered && m1.rendered && m1b.rendered && m1c.rendered &&
+                    m0.got == kGoldenM0ChordHash && m1.got == kGoldenM1ChordHash &&
+                    m1b.got == kGoldenM1bChordHash && m1c.got == kGoldenM1cChordHash;
+    std::printf("%s 50 M3a bypass golden: m0_expected=0x%016llx got=0x%016llx "
+                "m1_expected=0x%016llx got=0x%016llx "
+                "m1b_expected=0x%016llx got=0x%016llx "
+                "m1c_expected=0x%016llx got=0x%016llx\n",
+                ok ? "PASS" : "FAIL",
+                static_cast<unsigned long long>(kGoldenM0ChordHash),
+                static_cast<unsigned long long>(m0.got),
+                static_cast<unsigned long long>(kGoldenM1ChordHash),
+                static_cast<unsigned long long>(m1.got),
+                static_cast<unsigned long long>(kGoldenM1bChordHash),
+                static_cast<unsigned long long>(m1b.got),
+                static_cast<unsigned long long>(kGoldenM1cChordHash),
+                static_cast<unsigned long long>(m1c.got));
+    return ok;
+}
+
+static std::vector<Parameters> voice_filter_override_params() {
+    return {
+        {0, 1.0f}, {1, 0.0f}, {2, 1.0f}, {3, 0.0f}, {4, 0.0f}, {5, 1.0f},
+        {6, 0.0f}, {7, 1.0f}, {9, 1.0f}, {15, 1.0f}, {16, 0.25f},
+        {19, 0.0f}, {29, 0.0f}, {32, 0.0f}, {35, 1.0f}, {36, 4.0f},
+        {37, 400.0f}, {38, 0.0f}, {39, 0.0f}, {40, 0.0f}, {41, 0.0f},
+        {42, 0.0f}, {43, 1.0f}, {44, 0.0f}, {49, 0.0f}, {50, 0.0f}, {51, 0.0f}
+    };
+}
+
+static StereoRender render_voice_filter_override_sequence() {
+    const std::vector<TimedEvent> events = {
+        {0, SYNTH_EV_NOTE_ON, 801, 60.0f, 1.0f},
+        {8192, SYNTH_EV_NOTE_OFF, 801, 0.0f, 0.0f},
+        {8192, SYNTH_EV_NOTE_ON, 802, 60.0f, 1.0f},
+        {8192, SYNTH_EV_VOICE_PARAM, 37, 4000.0f, 0.0f},
+        {16384, SYNTH_EV_NOTE_OFF, 802, 0.0f, 0.0f},
+        {16384, SYNTH_EV_NOTE_ON, 803, 60.0f, 1.0f}
+    };
+    return render_stereo(48000, 128, 24576, events, voice_filter_override_params(), 281u);
+}
+
+static bool test_voice_param_override() {
+    const StereoRender output = render_voice_filter_override_sequence();
+    constexpr uint32_t fftSize = 4096;
+    const double first = spectral_centroid(output.left, 48000, 2048, fftSize);
+    const double second = spectral_centroid(output.left, 48000, 8192 + 2048, fftSize);
+    const double ratio = second / first;
+    const bool ok = output.left.size() == 24576 && std::isfinite(ratio) && ratio >= 1.5;
+    std::printf("%s 51 voice param override: first_centroid_hz=%.6f second_centroid_hz=%.6f ratio=%.6f minimum=1.500000\n",
+        ok ? "PASS" : "FAIL", first, second, ratio);
+    return ok;
+}
+
+static bool test_voice_param_not_carried() {
+    const StereoRender output = render_voice_filter_override_sequence();
+    constexpr uint32_t fftSize = 4096;
+    const double first = spectral_centroid(output.left, 48000, 2048, fftSize);
+    const double third = spectral_centroid(output.left, 48000, 16384 + 2048, fftSize);
+    const double difference = std::fabs(third - first) / first;
+    const bool ok = output.left.size() == 24576 && std::isfinite(difference) && difference <= 0.10;
+    std::printf("%s 52 voice param one note only: first_centroid_hz=%.6f third_centroid_hz=%.6f difference_percent=%.6f limit_percent=10.000000\n",
+        ok ? "PASS" : "FAIL", first, third, difference * 100.0);
+    return ok;
+}
+
+static bool test_voice_param_allowlist() {
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 1);
+    if (engine == nullptr) return false;
+    SynthEvent events[17]{};
+    for (uint32_t i = 0; i < 16; ++i)
+        events[i] = SynthEvent{0, SYNTH_EV_NOTE_ON, 820u + i, 48.0f + i, 0.5f};
+    events[16] = SynthEvent{0, SYNTH_EV_VOICE_PARAM, 8, 1.0f, 0.0f};
+    float left = 0.0f;
+    float right = 0.0f;
+    const int ignored = synth_process(engine, events, 17, &left, &right, 1);
+    uint32_t active = 0;
+    for (uint32_t i = 0; i < synth::kVoiceCapacity; ++i) active += engine->voices[i].active != 0;
+    const SynthEvent nanEvent{
+        0, SYNTH_EV_VOICE_PARAM, 37, std::numeric_limits<float>::quiet_NaN(), 0.0f
+    };
+    const int nanIgnored = synth_process(engine, &nanEvent, 1, &left, &right, 1);
+    const bool ok = ignored == 1 && nanIgnored == 1 && active == 16 && engine->voiceLimit == 16;
+    std::printf("%s 53 voice param allowlist: disallowed_ignored=%d nan_ignored=%d active=%u voice_limit=%u\n",
+        ok ? "PASS" : "FAIL", ignored, nanIgnored, active, engine->voiceLimit);
+    return ok;
+}
+
+static std::vector<Parameters> send_test_params(float sendLevel) {
+    return {
+        {0, 1.0f}, {1, 0.0f}, {2, 1.0f}, {3, 0.0f}, {4, 0.0f}, {5, 1.0f},
+        {6, 0.0f}, {7, 1.0f}, {9, 1.0f}, {15, 1.0f}, {16, 0.25f},
+        {19, 0.0f}, {29, 0.0f}, {32, 0.0f}, {35, 0.0f}, {75, sendLevel}
+    };
+}
+
+static bool test_send_output() {
+    const std::vector<TimedEvent> events = {{0, SYNTH_EV_NOTE_ON, 841, 60.0f, 1.0f}};
+    const SendRender zero = render_send(48000, 128, 4096, events, send_test_params(0.0f), 283u);
+    const SendRender half = render_send(48000, 128, 4096, events, send_test_params(0.5f), 283u);
+    std::vector<Parameters> reducedMasterParams = send_test_params(0.5f);
+    reducedMasterParams.push_back({7, 0.25f});
+    const SendRender reducedMaster = render_send(
+        48000, 128, 4096, events, reducedMasterParams, 283u);
+    size_t zeroNonzero = 0;
+    double maximumError = 0.0;
+    for (size_t i = 0; i < zero.sendLeft.size(); ++i) {
+        zeroNonzero += zero.sendLeft[i] != 0.0f;
+        zeroNonzero += zero.sendRight[i] != 0.0f;
+    }
+    for (size_t i = 0; i < half.sendLeft.size(); ++i) {
+        maximumError = std::max(maximumError,
+            std::fabs(static_cast<double>(half.sendLeft[i] - half.left[i] * 0.5f)));
+        maximumError = std::max(maximumError,
+            std::fabs(static_cast<double>(half.sendRight[i] - half.right[i] * 0.5f)));
+    }
+    const size_t dryMismatch = bit_mismatches(zero.left, half.left) +
+        bit_mismatches(zero.right, half.right);
+    const size_t masterBypassMismatch = bit_mismatches(half.sendLeft, reducedMaster.sendLeft) +
+        bit_mismatches(half.sendRight, reducedMaster.sendRight);
+    const bool ok = zero.left.size() == 4096 && half.left.size() == 4096 &&
+        reducedMaster.left.size() == 4096 && zeroNonzero == 0 && dryMismatch == 0 &&
+        masterBypassMismatch == 0 && maximumError < 1.0e-6;
+    std::printf("%s 54 send output: zero_nonzero=%zu dry_bit_mismatches=%zu half_max_abs_error=%.9g master_bypass_send_mismatches=%zu limit=1e-6\n",
+        ok ? "PASS" : "FAIL", zeroNonzero, dryMismatch, maximumError, masterBypassMismatch);
+    return ok;
+}
+
+static bool test_per_note_send() {
+    const std::vector<TimedEvent> events = {
+        {0, SYNTH_EV_NOTE_ON, 851, 60.0f, 1.0f},
+        {4096, SYNTH_EV_NOTE_OFF, 851, 0.0f, 0.0f},
+        {4096, SYNTH_EV_NOTE_ON, 852, 60.0f, 1.0f},
+        {4096, SYNTH_EV_VOICE_PARAM, 75, 1.0f, 0.0f}
+    };
+    const SendRender output = render_send(48000, 128, 8192, events, send_test_params(0.0f), 293u);
+    double firstPeak = 0.0;
+    double secondSquares = 0.0;
+    for (size_t i = 0; i < 4096; ++i) {
+        firstPeak = std::max(firstPeak, std::fabs(static_cast<double>(output.sendLeft[i])));
+        firstPeak = std::max(firstPeak, std::fabs(static_cast<double>(output.sendRight[i])));
+    }
+    for (size_t i = 4096; i < 8192; ++i) {
+        secondSquares += static_cast<double>(output.sendLeft[i]) * output.sendLeft[i];
+        secondSquares += static_cast<double>(output.sendRight[i]) * output.sendRight[i];
+    }
+    const double secondRms = std::sqrt(secondSquares / 8192.0);
+    const bool ok = output.left.size() == 8192 && firstPeak == 0.0 && secondRms > 0.01;
+    std::printf("%s 55 per-note send: first_note_send_peak=%.9f second_note_send_rms=%.9f\n",
+        ok ? "PASS" : "FAIL", firstPeak, secondRms);
+    return ok;
+}
+
+static size_t send_render_mismatches(const SendRender& a, const SendRender& b) {
+    return bit_mismatches(a.left, b.left) + bit_mismatches(a.right, b.right) +
+        bit_mismatches(a.sendLeft, b.sendLeft) + bit_mismatches(a.sendRight, b.sendRight);
+}
+
+static bool test_voice_param_send_determinism() {
+    const std::vector<TimedEvent> events = {
+        {0, SYNTH_EV_NOTE_ON, 861, 48.0f, 0.8f},
+        {0, SYNTH_EV_VOICE_PARAM, 1, 0.8f, 0.0f},
+        {256, SYNTH_EV_VOICE_PARAM, 37, 4000.0f, 0.0f},
+        {256, SYNTH_EV_VOICE_PARAM, 75, 0.75f, 0.0f},
+        {257, SYNTH_EV_NOTE_ON, 862, 55.0f, 0.6f},
+        {2049, SYNTH_EV_NOTE_OFF, 861, 0.0f, 0.0f},
+        {3073, SYNTH_EV_NOTE_OFF, 862, 0.0f, 0.0f}
+    };
+    const uint32_t blocks[] = {1, 7, 64, 128, 511};
+    const std::vector<Parameters> parameters = all_m1c_params();
+    const SendRender reference = render_send(48000, blocks[0], 4096, events, parameters, 307u);
+    size_t blockMismatch = 0;
+    for (size_t i = 1; i < sizeof(blocks) / sizeof(blocks[0]); ++i)
+        blockMismatch += send_render_mismatches(reference,
+            render_send(48000, blocks[i], 4096, events, parameters, 307u));
+
+    constexpr uint32_t block = 128;
+    constexpr uint32_t frames = 4096;
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, block);
+    if (engine == nullptr) return false;
+    for (const Parameters& parameter : parameters)
+        if (synth_set_param(engine, parameter.id, parameter.value) != 0) return false;
+    SendRender passes[2];
+    bool rendered = true;
+    for (uint32_t pass = 0; pass < 2; ++pass) {
+        synth_reset(engine, SYNTH_RESET_VOICES, 307u);
+        passes[pass] = SendRender{
+            std::vector<float>(frames), std::vector<float>(frames),
+            std::vector<float>(frames), std::vector<float>(frames)
+        };
+        for (uint32_t position = 0; position < frames; position += block) {
+            std::vector<SynthEvent> blockEvents;
+            for (const TimedEvent& event : events) {
+                if (event.frame >= position && event.frame < position + block) {
+                    blockEvents.push_back(SynthEvent{
+                        static_cast<uint32_t>(event.frame - position), event.kind, event.id,
+                        event.a, event.b
+                    });
+                }
+            }
+            const int result = synth_process_send(engine,
+                blockEvents.empty() ? nullptr : blockEvents.data(),
+                static_cast<uint32_t>(blockEvents.size()), passes[pass].left.data() + position,
+                passes[pass].right.data() + position, passes[pass].sendLeft.data() + position,
+                passes[pass].sendRight.data() + position, block);
+            rendered = rendered && result == 0;
+        }
+    }
+    const size_t resetMismatch = send_render_mismatches(passes[0], passes[1]);
+    const bool ok = rendered && !reference.left.empty() && blockMismatch == 0 && resetMismatch == 0;
+    std::printf("%s 56 voice param/send determinism: blocks=1,7,64,128,511 block_mismatches=%zu reset_mismatches=%zu carry_boundary=256_to_257\n",
+        ok ? "PASS" : "FAIL", blockMismatch, resetMismatch);
+    return ok;
+}
+
+static bool test_voice_param_performance() {
+    constexpr uint32_t block = 128;
+    constexpr uint32_t iterations = 1000;
+    constexpr double deadline = 2667.0;
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, block);
+    if (engine == nullptr) return false;
+    std::vector<Parameters> parameters = {
+        {0, 1.0f}, {2, 0.8f}, {3, 0.0f}, {4, 0.0f}, {5, 1.0f}, {7, 0.05f},
+        {8, 16.0f}, {9, 4.0f}, {10, 12.0f}, {11, 0.8f}, {35, 1.0f},
+        {36, 4.0f}, {37, 1000.0f}, {38, 0.7f}, {46, 5.0f}, {47, 0.0f},
+        {49, 3.0f}, {73, 0.5f}, {74, 0.25f}, {75, 0.0f}
+    };
+    add_mod_slot(parameters, 0, 1, 8, 0.25f);
+    add_mod_slot(parameters, 1, 2, 1, 0.1f);
+    add_mod_slot(parameters, 2, 3, 9, 0.1f);
+    add_mod_slot(parameters, 3, 4, 10, 0.05f);
+    add_mod_slot(parameters, 4, 5, 11, 0.1f);
+    add_mod_slot(parameters, 5, 6, 13, 0.25f);
+    for (const Parameters& parameter : parameters)
+        if (synth_set_param(engine, parameter.id, parameter.value) != 0) return false;
+    synth_reset(engine, SYNTH_RESET_VOICES, 311u);
+    SynthEvent startEvents[48]{};
+    for (uint32_t i = 0; i < 16; ++i) {
+        startEvents[i * 3] = SynthEvent{
+            i, SYNTH_EV_NOTE_ON, 900u + i, 36.0f + i * 2.0f, 0.7f
+        };
+        startEvents[i * 3 + 1] = SynthEvent{
+            i, SYNTH_EV_VOICE_PARAM, 37, 800.0f + 80.0f * i, 0.0f
+        };
+        startEvents[i * 3 + 2] = SynthEvent{
+            i, SYNTH_EV_VOICE_PARAM, 75, 0.5f, 0.0f
+        };
+    }
+    float left[block]{};
+    float right[block]{};
+    float sendLeft[block]{};
+    float sendRight[block]{};
+    if (synth_process_send(engine, startEvents, 48, left, right, sendLeft, sendRight, block) != 0)
+        return false;
+    for (uint32_t i = 0; i < 100; ++i) {
+        if (synth_process_send(engine, nullptr, 0, left, right, sendLeft, sendRight, block) != 0)
+            return false;
+    }
+    std::vector<double> timings;
+    timings.reserve(iterations);
+    double sum = 0.0;
+    for (uint32_t i = 0; i < iterations; ++i) {
+        const auto start = std::chrono::steady_clock::now();
+        const int result = synth_process_send(
+            engine, nullptr, 0, left, right, sendLeft, sendRight, block);
+        const auto stop = std::chrono::steady_clock::now();
+        if (result != 0) return false;
+        const double micros = std::chrono::duration<double, std::micro>(stop - start).count();
+        timings.push_back(micros);
+        sum += micros;
+    }
+    std::sort(timings.begin(), timings.end());
+    const double average = sum / iterations;
+    const double p99 = timings[static_cast<size_t>(iterations * 0.99)];
+    const bool ok = std::isfinite(average) && std::isfinite(p99) && p99 < deadline * 0.5;
+    std::printf("%s 57 voice param performance: overrides=16 slots=6 voices=16 unison=4 LP24 average_us=%.6f p99_us=%.6f half_deadline_us=%.6f\n",
+        ok ? "PASS" : "FAIL", average, p99, deadline * 0.5);
+    return ok;
+}
+
 int main() {
     uint32_t passed = 0;
     passed += test_block_invariance();
@@ -2078,6 +2424,14 @@ int main() {
     passed += test_m1c_determinism();
     passed += test_m1c_performance();
     passed += test_sub_oscillator_one_octave_up();
-    std::printf("SUMMARY passed=%u failed=%u total=49\n", passed, 49u - passed);
-    return passed == 49 ? 0 : 1;
+    passed += test_m3a_bypass_golden();
+    passed += test_voice_param_override();
+    passed += test_voice_param_not_carried();
+    passed += test_voice_param_allowlist();
+    passed += test_send_output();
+    passed += test_per_note_send();
+    passed += test_voice_param_send_determinism();
+    passed += test_voice_param_performance();
+    std::printf("SUMMARY passed=%u failed=%u total=57\n", passed, 57u - passed);
+    return passed == 57 ? 0 : 1;
 }

@@ -97,6 +97,7 @@ inline constexpr SynthParamInfo kParameterInfo[] = {
     {72, "modSlot5Amount", "Mod 6 Amount", -1.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_BIPOLAR},
     {73, "macro1", "Macro 1", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
     {74, "macro2", "Macro 2", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
+    {75, "sendLevel", "Send Level", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_GAIN},
 };
 
 inline constexpr uint32_t kParamCount =
@@ -109,7 +110,7 @@ constexpr bool parameter_ids_are_contiguous() {
     return true;
 }
 
-static_assert(kParamCount == 75);
+static_assert(kParamCount == 76);
 static_assert(parameter_ids_are_contiguous());
 
 }  // namespace synth
