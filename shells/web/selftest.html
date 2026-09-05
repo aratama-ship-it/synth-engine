@@ -168,8 +168,11 @@ document.getElementById("play").addEventListener("click", async (event) => {
     for (const [id, value] of parsePreset(presetText)) synth.setParam(id, value);
     add("実際に音を鳴らす", `AudioContext 起動 ${context.sampleRate} Hz・状態 ${context.state}`, check(context.state === "running"));
     const notes = [60, 64, 67];
-    notes.forEach((note, index) => setTimeout(() => synth.noteOn(200 + index, note, 1.0), index * 260));
-    notes.forEach((note, index) => setTimeout(() => synth.noteOff(200 + index), 1600 + index * 60));
+    // ★バグ修正（2026-09-05）: noteOn の正しい引数順は (note, velocity, atFrame)。
+    // 誤って (id, note, atFrame) の順で呼んでおり、MIDIノート番号「200」という
+    // 範囲外の値で発音していたため実質無音だった（本人指摘で発覚）。
+    notes.forEach((note, index) => setTimeout(() => synth.noteOn(note, 1.0), index * 260));
+    notes.forEach((note, index) => setTimeout(() => synth.noteOff(note), 1600 + index * 60));
     setTimeout(() => { add("発音の指示", "3音を鳴らしました（聞こえましたか？）", "wait"); finish(); }, 2200);
   } catch (error) {
     add("実際に音を鳴らす", String(error), check(false)); finish();
