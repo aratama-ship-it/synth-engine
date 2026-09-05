@@ -32,6 +32,11 @@ inline double fast_sin(double value) {
 
 inline double fast_cos(double value) { return fast_sin(value + kHalfPi); }
 
+inline double tan_pi_normalized(double value) {
+    const double angle = kPi * value;
+    return fast_sin(angle) / fast_cos(angle);
+}
+
 inline double exp2_fraction(double x) {
     const double y = x * kLn2;
     return 1.0 + y * (1.0 + y * (1.0 / 2.0 + y * (1.0 / 6.0 +
@@ -51,6 +56,8 @@ inline double fast_exp2(double value) {
     }
     return scale * exp2_fraction(fraction);
 }
+
+inline double exp2_fast(double value) { return fast_exp2(value); }
 
 inline double fast_pow2(double value) { return fast_exp2(value); }
 

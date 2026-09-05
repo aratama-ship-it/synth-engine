@@ -299,20 +299,26 @@ static bool test_fast_math() {
     double maxSinError = 0.0;
     double maxCosError = 0.0;
     double maxExpRelative = 0.0;
+    double maxTanRelative = 0.0;
     constexpr uint32_t samples = 100000;
     for (uint32_t i = 0; i <= samples; ++i) {
         const double ratio = static_cast<double>(i) / static_cast<double>(samples);
         const double angle = ratio * synth::kTwoPi;
         maxSinError = std::max(maxSinError, std::fabs(synth::fast_sin(angle) - std::sin(angle)));
         maxCosError = std::max(maxCosError, std::fabs(synth::fast_cos(angle) - std::cos(angle)));
-        const double expected = std::exp2(ratio);
+        const double exponent = -14.0 + 28.0 * ratio;
+        const double expected = std::exp2(exponent);
         maxExpRelative = std::max(maxExpRelative,
-            std::fabs(synth::fast_exp2(ratio) - expected) / expected);
+            std::fabs(synth::exp2_fast(exponent) - expected) / expected);
+        const double normalized = 0.000001 + 0.449998 * ratio;
+        const double expectedTan = std::tan(synth::kPi * normalized);
+        maxTanRelative = std::max(maxTanRelative,
+            std::fabs(synth::tan_pi_normalized(normalized) - expectedTan) / expectedTan);
     }
     const bool ok = maxSinError <= 1.0e-4 && maxCosError <= 1.0e-4 &&
-                    maxExpRelative <= 1.0e-5;
-    std::printf("%s 7 fast_math: sin_max=%.9g cos_max=%.9g exp2_rel_max=%.9g\n",
-                ok ? "PASS" : "FAIL", maxSinError, maxCosError, maxExpRelative);
+                    maxExpRelative <= 1.0e-5 && maxTanRelative <= 1.0e-5;
+    std::printf("%s 7 fast_math: sin_max=%.9g cos_max=%.9g exp2_rel_max=%.9g tan_rel_max=%.9g\n",
+        ok ? "PASS" : "FAIL", maxSinError, maxCosError, maxExpRelative, maxTanRelative);
     return ok;
 }
 
@@ -719,7 +725,7 @@ static bool test_pink_noise_slope() {
 }
 
 static bool test_parameter_sweep() {
-    static constexpr float values[35][3] = {
+    static constexpr float values[53][3] = {
         {0.0f, 0.0f, 3.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.8f, 4.0f},
         {0.0f, 0.005f, 60.0f}, {0.0f, 0.1f, 60.0f}, {0.0f, 0.8f, 1.0f},
         {0.0f, 0.2f, 60.0f}, {0.0f, 0.2f, 4.0f}, {1.0f, 16.0f, 16.0f},
@@ -731,12 +737,18 @@ static bool test_parameter_sweep() {
         {-12.0f, 0.0f, 12.0f}, {-100.0f, 0.0f, 100.0f}, {0.0f, 0.0f, 1.0f},
         {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 4.0f},
         {0.0f, 0.0f, 2.0f}, {-2.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 4.0f},
-        {0.0f, 0.0f, 1.0f}, {0.0f, 0.05f, 60.0f}
+        {0.0f, 0.0f, 1.0f}, {0.0f, 0.05f, 60.0f},
+        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 5.0f}, {20.0f, 20000.0f, 20000.0f},
+        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {-8.0f, 0.0f, 8.0f},
+        {0.0f, 0.005f, 20.0f}, {0.0f, 0.2f, 20.0f}, {0.0f, 1.0f, 1.0f},
+        {0.0f, 0.2f, 20.0f}, {0.0f, 0.0f, 1.0f}, {0.01f, 1.0f, 40.0f},
+        {0.0f, 0.0f, 5.0f}, {0.0f, 0.0f, 1.0f}, {-8.0f, 0.0f, 8.0f},
+        {-1200.0f, 0.0f, 1200.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}
     };
     uint64_t nonFinite = 0;
     double peak = 0.0;
     uint32_t renders = 0;
-    for (uint32_t id = 0; id < 35; ++id) {
+    for (uint32_t id = 0; id < 53; ++id) {
         for (uint32_t choice = 0; choice < 3; ++choice) {
             std::vector<Parameters> params = {
                 {3, 0.0f}, {4, 0.0f}, {5, 1.0f}, {6, 0.01f}, {7, 0.2f},
@@ -756,7 +768,7 @@ static bool test_parameter_sweep() {
             ++renders;
         }
     }
-    const bool ok = renders == 105 && nonFinite == 0 && peak <= 8.0 && synth_engine_version() == 2;
+    const bool ok = renders == 159 && nonFinite == 0 && peak <= 8.0 && synth_engine_version() == 3;
     std::printf("%s 19 parameter sweep: renders=%u nan_inf=%llu peak=%.9f limit=8.000000 version=%u\n",
                 ok ? "PASS" : "FAIL", renders,
                 static_cast<unsigned long long>(nonFinite), peak, synth_engine_version());
@@ -834,6 +846,514 @@ static bool test_extended_block_invariance() {
     return ok;
 }
 
+static bool load_parameter_file(const char* path, std::vector<Parameters>& parameters) {
+    std::ifstream input(path);
+    std::string line;
+    while (std::getline(input, line)) {
+        const size_t comment = line.find('#');
+        if (comment != std::string::npos) line.resize(comment);
+        for (char& character : line) if (character == '=') character = ' ';
+        std::istringstream stream(line);
+        Parameters parameter{};
+        if (!(stream >> parameter.id)) continue;
+        if (!(stream >> parameter.value)) return false;
+        parameters.push_back(parameter);
+    }
+    return input.eof();
+}
+
+static bool load_timed_event_file(const char* path, std::vector<TimedEvent>& events) {
+    std::ifstream input(path);
+    std::string line;
+    while (std::getline(input, line)) {
+        const size_t comment = line.find('#');
+        if (comment != std::string::npos) line.resize(comment);
+        std::istringstream stream(line);
+        TimedEvent event{};
+        if (!(stream >> event.frame)) continue;
+        if (!(stream >> event.kind >> event.id >> event.a >> event.b)) return false;
+        events.push_back(event);
+    }
+    return input.eof();
+}
+
+static uint32_t read_le_u32(const unsigned char* bytes) {
+    return static_cast<uint32_t>(bytes[0]) |
+        (static_cast<uint32_t>(bytes[1]) << 8) |
+        (static_cast<uint32_t>(bytes[2]) << 16) |
+        (static_cast<uint32_t>(bytes[3]) << 24);
+}
+
+static StereoRender load_float_stereo_wav(const char* path) {
+    std::ifstream input(path, std::ios::binary);
+    unsigned char header[44]{};
+    input.read(reinterpret_cast<char*>(header), sizeof(header));
+    if (!input || std::memcmp(header, "RIFF", 4) != 0 ||
+        std::memcmp(header + 8, "WAVEfmt ", 8) != 0 ||
+        std::memcmp(header + 36, "data", 4) != 0 ||
+        header[20] != 3 || header[22] != 2 || header[34] != 32) return {};
+    const uint32_t dataBytes = read_le_u32(header + 40);
+    if ((dataBytes & 7u) != 0) return {};
+    const size_t frames = dataBytes / 8u;
+    StereoRender output{std::vector<float>(frames), std::vector<float>(frames)};
+    unsigned char sampleBytes[8]{};
+    for (size_t i = 0; i < frames; ++i) {
+        input.read(reinterpret_cast<char*>(sampleBytes), sizeof(sampleBytes));
+        if (!input) return {};
+        uint32_t bits = read_le_u32(sampleBytes);
+        std::memcpy(&output.left[i], &bits, sizeof(bits));
+        bits = read_le_u32(sampleBytes + 4);
+        std::memcpy(&output.right[i], &bits, sizeof(bits));
+    }
+    return output;
+}
+
+static bool golden_case(const char* presetPath, const char* eventPath,
+                        const char* goldenPath, size_t* mismatches) {
+    std::vector<Parameters> parameters;
+    std::vector<TimedEvent> events;
+    if (!load_parameter_file(presetPath, parameters) ||
+        !load_timed_event_file(eventPath, events)) return false;
+    const StereoRender rendered = render_stereo(48000, 128, 96000, events, parameters, 0);
+    const StereoRender golden = load_float_stereo_wav(goldenPath);
+    *mismatches += bit_mismatches(rendered.left, golden.left);
+    *mismatches += bit_mismatches(rendered.right, golden.right);
+    return rendered.left.size() == 96000 && golden.left.size() == 96000;
+}
+
+static bool test_m1b_bypass_golden() {
+    size_t sawMismatch = 0;
+    size_t unisonMismatch = 0;
+    const bool sawLoaded = golden_case("presets/m0_saw.txt", "fixtures/m0_events_chord.txt",
+        "/tmp/golden_m0_saw.wav", &sawMismatch);
+    const bool unisonLoaded = golden_case("presets/m1_unison_saw.txt", "fixtures/listen_chord.txt",
+        "/tmp/golden_m1_unison.wav", &unisonMismatch);
+    const bool ok = sawLoaded && unisonLoaded && sawMismatch == 0 && unisonMismatch == 0;
+    std::printf("%s 22 M1b bypass golden: m0_saw_bit_mismatches=%zu m1_unison_bit_mismatches=%zu\n",
+                ok ? "PASS" : "FAIL", sawMismatch, unisonMismatch);
+    return ok;
+}
+
+static std::vector<Parameters> filter_noise_params(float cutoff, float resonance, float mode,
+                                                    float keyTrack, bool enabled) {
+    std::vector<Parameters> params = clean_analysis_params();
+    params.insert(params.end(), {
+        {2, 0.0f}, {7, 1.0f}, {32, 1.0f}, {33, 0.0f}, {34, 60.0f},
+        {35, enabled ? 1.0f : 0.0f}, {36, mode}, {37, cutoff}, {38, resonance},
+        {39, keyTrack}, {40, 0.0f}, {41, 0.0f}, {42, 0.0f}, {43, 1.0f}
+    });
+    return params;
+}
+
+static std::vector<double> averaged_spectrum_power(const std::vector<float>& input,
+                                                   uint32_t start, uint32_t fftSize,
+                                                   uint32_t segments) {
+    std::vector<double> average(fftSize / 2, 0.0);
+    for (uint32_t segment = 0; segment < segments; ++segment) {
+        const std::vector<double> power = spectrum_power(
+            input, start + segment * fftSize, fftSize, false);
+        if (power.size() != average.size()) return {};
+        for (size_t bin = 0; bin < average.size(); ++bin) average[bin] += power[bin];
+    }
+    return average;
+}
+
+static double transfer_db(const std::vector<double>& filtered,
+                          const std::vector<double>& reference, uint32_t center,
+                          uint32_t radius) {
+    const uint32_t low = center > radius ? center - radius : 1u;
+    const uint32_t high = std::min<uint32_t>(
+        static_cast<uint32_t>(filtered.size() - 1), center + radius);
+    double numerator = 0.0;
+    double denominator = 0.0;
+    for (uint32_t bin = low; bin <= high; ++bin) {
+        numerator += filtered[bin];
+        denominator += reference[bin];
+    }
+    return 10.0 * std::log10(std::max(numerator, 1.0e-300) /
+                             std::max(denominator, 1.0e-300));
+}
+
+static double measured_filter_cutoff(float cutoff, float midi, float keyTrack,
+                                     double* measuredDb) {
+    constexpr uint32_t sampleRate = 48000;
+    constexpr uint32_t fftSize = 32768;
+    constexpr uint32_t segments = 4;
+    constexpr uint32_t start = 32768;
+    constexpr uint32_t frames = start + fftSize * segments;
+    constexpr float butterworthResonance = 0.294415f;
+    const std::vector<TimedEvent> events = {{0, SYNTH_EV_NOTE_ON, 301, midi, 1.0f}};
+    const StereoRender reference = render_stereo(sampleRate, 128, frames, events,
+        filter_noise_params(cutoff, butterworthResonance, 0.0f, keyTrack, false), 101u);
+    const StereoRender filtered = render_stereo(sampleRate, 128, frames, events,
+        filter_noise_params(cutoff, butterworthResonance, 0.0f, keyTrack, true), 101u);
+    const std::vector<double> referencePower = averaged_spectrum_power(
+        reference.left, start, fftSize, segments);
+    const std::vector<double> filteredPower = averaged_spectrum_power(
+        filtered.left, start, fftSize, segments);
+    if (referencePower.empty() || filteredPower.empty()) return 0.0;
+    const double expected = static_cast<double>(cutoff) *
+        std::exp2(static_cast<double>(keyTrack) * (static_cast<double>(midi) - 60.0) / 12.0);
+    uint32_t low = static_cast<uint32_t>(expected * 0.45 * fftSize / sampleRate);
+    uint32_t high = static_cast<uint32_t>(expected * 1.55 * fftSize / sampleRate);
+    low = std::max<uint32_t>(2, low);
+    high = std::min<uint32_t>(static_cast<uint32_t>(filteredPower.size() - 2), high);
+    uint32_t best = low;
+    double bestDistance = 1.0e30;
+    double bestDb = 0.0;
+    for (uint32_t bin = low; bin <= high; ++bin) {
+        const double db = transfer_db(filteredPower, referencePower, bin, 2);
+        const double distance = std::fabs(db + 3.01029995664);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = bin;
+            bestDb = db;
+        }
+    }
+    *measuredDb = bestDb;
+    return static_cast<double>(best) * sampleRate / fftSize;
+}
+
+static bool test_filter_cutoff_accuracy() {
+    const float settings[3] = {200.0f, 1000.0f, 5000.0f};
+    double measured[3]{};
+    double errors[3]{};
+    double db[3]{};
+    bool ok = true;
+    for (uint32_t i = 0; i < 3; ++i) {
+        measured[i] = measured_filter_cutoff(settings[i], 60.0f, 0.0f, &db[i]);
+        errors[i] = std::fabs(measured[i] - settings[i]) / settings[i];
+        ok = ok && errors[i] <= 0.05;
+    }
+    std::printf("%s 23 cutoff: 200=%.3fHz err=%.3f%% 1000=%.3fHz err=%.3f%% 5000=%.3fHz err=%.3f%%\n",
+        ok ? "PASS" : "FAIL", measured[0], errors[0] * 100.0,
+        measured[1], errors[1] * 100.0, measured[2], errors[2] * 100.0);
+    return ok;
+}
+
+static double measured_filter_slope(uint32_t mode) {
+    constexpr uint32_t sampleRate = 48000;
+    constexpr uint32_t fftSize = 32768;
+    constexpr uint32_t segments = 4;
+    constexpr uint32_t start = 32768;
+    constexpr uint32_t frames = start + fftSize * segments;
+    const std::vector<TimedEvent> events = {{0, SYNTH_EV_NOTE_ON, 302, 60.0f, 1.0f}};
+    const StereoRender reference = render_stereo(sampleRate, 128, frames, events,
+        filter_noise_params(1000.0f, 0.0f, static_cast<float>(mode), 0.0f, false), 103u);
+    const StereoRender filtered = render_stereo(sampleRate, 128, frames, events,
+        filter_noise_params(1000.0f, 0.0f, static_cast<float>(mode), 0.0f, true), 103u);
+    const std::vector<double> referencePower = averaged_spectrum_power(
+        reference.left, start, fftSize, segments);
+    const std::vector<double> filteredPower = averaged_spectrum_power(
+        filtered.left, start, fftSize, segments);
+    const uint32_t bin2k = static_cast<uint32_t>(2000.0 * fftSize / sampleRate + 0.5);
+    const uint32_t bin8k = static_cast<uint32_t>(8000.0 * fftSize / sampleRate + 0.5);
+    const double db2k = transfer_db(filteredPower, referencePower, bin2k, 12);
+    const double db8k = transfer_db(filteredPower, referencePower, bin8k, 48);
+    return (db8k - db2k) / 2.0;
+}
+
+static bool test_filter_slopes() {
+    const double lp12 = measured_filter_slope(0);
+    const double lp24 = measured_filter_slope(4);
+    const bool ok = std::fabs(lp12 + 12.0) <= 3.0 && std::fabs(lp24 + 24.0) <= 3.0;
+    std::printf("%s 24 slopes: LP12=%.6f_dB/oct LP24=%.6f_dB/oct expected=-12/-24 +/-3\n",
+                ok ? "PASS" : "FAIL", lp12, lp24);
+    return ok;
+}
+
+static bool test_filter_resonance_peak() {
+    constexpr uint32_t sampleRate = 48000;
+    constexpr uint32_t fftSize = 32768;
+    constexpr uint32_t segments = 4;
+    constexpr uint32_t start = 32768;
+    constexpr uint32_t frames = start + fftSize * segments;
+    const std::vector<TimedEvent> events = {{0, SYNTH_EV_NOTE_ON, 303, 60.0f, 1.0f}};
+    const StereoRender zero = render_stereo(sampleRate, 128, frames, events,
+        filter_noise_params(1000.0f, 0.0f, 0.0f, 0.0f, true), 107u);
+    const StereoRender resonant = render_stereo(sampleRate, 128, frames, events,
+        filter_noise_params(1000.0f, 0.8f, 0.0f, 0.0f, true), 107u);
+    const std::vector<double> zeroPower = averaged_spectrum_power(
+        zero.left, start, fftSize, segments);
+    const std::vector<double> resonantPower = averaged_spectrum_power(
+        resonant.left, start, fftSize, segments);
+    double peakDb = -1000.0;
+    const uint32_t low = static_cast<uint32_t>(700.0 * fftSize / sampleRate);
+    const uint32_t high = static_cast<uint32_t>(1300.0 * fftSize / sampleRate);
+    for (uint32_t bin = low; bin <= high; ++bin)
+        peakDb = std::max(peakDb, transfer_db(resonantPower, zeroPower, bin, 2));
+    const bool ok = std::isfinite(peakDb) && peakDb >= 10.0;
+    std::printf("%s 25 resonance peak: gain_over_res0_db=%.6f minimum_db=10.000000\n",
+                ok ? "PASS" : "FAIL", peakDb);
+    return ok;
+}
+
+static void finite_and_peak(const StereoRender& output, uint64_t* nonFinite, double* peak) {
+    for (size_t i = 0; i < output.left.size(); ++i) {
+        if (!std::isfinite(output.left[i]) || !std::isfinite(output.right[i])) ++*nonFinite;
+        *peak = std::max(*peak, std::fabs(static_cast<double>(output.left[i])));
+        *peak = std::max(*peak, std::fabs(static_cast<double>(output.right[i])));
+    }
+}
+
+static bool test_filter_self_oscillation_stability() {
+    std::vector<Parameters> params = clean_analysis_params();
+    params.insert(params.end(), {{2, 0.0f}, {32, 0.0f}, {35, 1.0f}, {36, 0.0f},
+        {37, 1000.0f}, {38, 1.0f}});
+    const StereoRender output = render_stereo(48000, 128, 480000,
+        {{0, SYNTH_EV_NOTE_ON, 304, 60.0f, 1.0f}}, params, 109u);
+    uint64_t nonFinite = 0;
+    double peak = 0.0;
+    finite_and_peak(output, &nonFinite, &peak);
+    const bool ok = output.left.size() == 480000 && nonFinite == 0 && peak <= 8.0;
+    std::printf("%s 26 self oscillation stability: seconds=10 nan_inf=%llu peak=%.9f limit=8.000000\n",
+        ok ? "PASS" : "FAIL", static_cast<unsigned long long>(nonFinite), peak);
+    return ok;
+}
+
+static bool test_filter_fast_modulation_stability() {
+    std::vector<Parameters> params = clean_analysis_params();
+    params.insert(params.end(), {{0, 1.0f}, {2, 0.5f}, {7, 0.1f}, {35, 1.0f},
+        {36, 4.0f}, {37, 1000.0f}, {38, 0.9f}, {46, 40.0f}, {49, 8.0f}});
+    const StereoRender output = render_stereo(48000, 128, 240000,
+        {{0, SYNTH_EV_NOTE_ON, 305, 48.0f, 1.0f}}, params, 113u);
+    uint64_t nonFinite = 0;
+    double peak = 0.0;
+    finite_and_peak(output, &nonFinite, &peak);
+    const bool ok = output.left.size() == 240000 && nonFinite == 0 && peak <= 8.0;
+    std::printf("%s 27 fast modulation stability: seconds=5 nan_inf=%llu peak=%.9f limit=8.000000\n",
+        ok ? "PASS" : "FAIL", static_cast<unsigned long long>(nonFinite), peak);
+    return ok;
+}
+
+static bool test_filter_key_tracking() {
+    double c3Db = 0.0;
+    double c4Db = 0.0;
+    const double c3 = measured_filter_cutoff(1000.0f, 48.0f, 1.0f, &c3Db);
+    const double c4 = measured_filter_cutoff(1000.0f, 60.0f, 1.0f, &c4Db);
+    const double ratio = c4 / c3;
+    const bool ok = std::isfinite(ratio) && std::fabs(ratio - 2.0) <= 0.2;
+    std::printf("%s 28 key track: C3_cutoff=%.3fHz C4_cutoff=%.3fHz ratio=%.6f expected=2.0+/-10%%\n",
+                ok ? "PASS" : "FAIL", c3, c4, ratio);
+    return ok;
+}
+
+static bool test_filter_envelope_centroid() {
+    std::vector<Parameters> params = clean_analysis_params();
+    params.insert(params.end(), {{0, 1.0f}, {2, 1.0f}, {35, 1.0f}, {36, 4.0f},
+        {37, 200.0f}, {38, 0.0f}, {40, 4.0f}, {41, 0.0f}, {42, 0.3f}, {43, 0.0f}});
+    const StereoRender output = render_stereo(48000, 128, 56000,
+        {{0, SYNTH_EV_NOTE_ON, 306, 48.0f, 1.0f}}, params, 127u);
+    const double early = spectral_centroid(output.left, 48000, 0, 2048);
+    const double late = spectral_centroid(output.left, 48000, 48000, 2048);
+    const double ratio = early / late;
+    const bool ok = std::isfinite(ratio) && ratio >= 2.0;
+    std::printf("%s 29 filter EG: centroid_first50ms=%.6fHz centroid_1s=%.6fHz ratio=%.6f minimum=2.000000\n",
+                ok ? "PASS" : "FAIL", early, late, ratio);
+    return ok;
+}
+
+static std::vector<Parameters> lfo_analysis_params(uint32_t shape, float ampDepth) {
+    std::vector<Parameters> params = clean_analysis_params();
+    params.insert(params.end(), {{0, 0.0f}, {2, 1.0f}, {9, 2.0f}, {10, 0.0f},
+        {11, 0.0f}, {15, 1.0f}, {16, 0.25f}, {46, 5.0f},
+        {47, static_cast<float>(shape)}, {48, 0.0f}, {51, ampDepth}, {52, 0.0f}});
+    return params;
+}
+
+static uint32_t measured_lfo_period(uint32_t shape) {
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 1);
+    if (engine == nullptr || synth_set_param(engine, 46, 5.0f) != 0 ||
+        synth_set_param(engine, 47, static_cast<float>(shape)) != 0) return 0;
+    synth_reset(engine, SYNTH_RESET_VOICES, 131u);
+    float left = 0.0f;
+    float right = 0.0f;
+    for (uint32_t samples = 1; samples <= 20000; ++samples) {
+        if (synth_process(engine, nullptr, 0, &left, &right, 1) != 0) return 0;
+        if (engine->globalLfoCycleIndex != 0) return samples;
+    }
+    return 0;
+}
+
+static bool test_lfo_shapes() {
+    constexpr uint32_t expectedPeriod = 9600;
+    double minimum[5]{};
+    double maximum[5]{};
+    double maxPeriodError = 0.0;
+    bool rangesOk = true;
+    for (uint32_t shape = 0; shape < 6; ++shape) {
+        const uint32_t period = measured_lfo_period(shape);
+        const double error = std::fabs(static_cast<double>(period) - expectedPeriod) / expectedPeriod;
+        maxPeriodError = std::max(maxPeriodError, error);
+        if (shape == 5) continue;
+        const StereoRender baseline = render_stereo(48000, 128, expectedPeriod,
+            {{0, SYNTH_EV_NOTE_ON, 307, 69.0f, 1.0f}}, lfo_analysis_params(shape, 0.0f), 137u);
+        const StereoRender modulated = render_stereo(48000, 128, expectedPeriod,
+            {{0, SYNTH_EV_NOTE_ON, 307, 69.0f, 1.0f}}, lfo_analysis_params(shape, 1.0f), 137u);
+        minimum[shape] = 1000.0;
+        maximum[shape] = -1000.0;
+        for (uint32_t i = 0; i < expectedPeriod; ++i) {
+            if (std::fabs(baseline.left[i]) < 0.05f) continue;
+            const double value = 2.0 * static_cast<double>(modulated.left[i]) /
+                                     static_cast<double>(baseline.left[i]) - 1.0;
+            minimum[shape] = std::min(minimum[shape], value);
+            maximum[shape] = std::max(maximum[shape], value);
+        }
+        rangesOk = rangesOk && std::fabs(minimum[shape] + 1.0) <= 0.005 &&
+            std::fabs(maximum[shape] - 1.0) <= 0.005;
+    }
+    const StereoRender shA = render_stereo(48000, 128, expectedPeriod * 3,
+        {{0, SYNTH_EV_NOTE_ON, 308, 69.0f, 1.0f}}, lfo_analysis_params(5, 1.0f), 139u);
+    const StereoRender shB = render_stereo(48000, 128, expectedPeriod * 3,
+        {{0, SYNTH_EV_NOTE_ON, 308, 69.0f, 1.0f}}, lfo_analysis_params(5, 1.0f), 139u);
+    const size_t shMismatch = bit_mismatches(shA.left, shB.left) +
+                              bit_mismatches(shA.right, shB.right);
+    const bool ok = rangesOk && maxPeriodError <= 0.01 && shMismatch == 0;
+    std::printf("%s 30 LFO shapes: minmax_sine=%.4f/%.4f triangle=%.4f/%.4f sawUp=%.4f/%.4f sawDown=%.4f/%.4f square=%.4f/%.4f period_error=%.6f%% SH_bit_mismatches=%zu\n",
+        ok ? "PASS" : "FAIL", minimum[0], maximum[0], minimum[1], maximum[1],
+        minimum[2], maximum[2], minimum[3], maximum[3], minimum[4], maximum[4],
+        maxPeriodError * 100.0, shMismatch);
+    return ok;
+}
+
+static bool test_lfo_retrigger() {
+    const std::vector<TimedEvent> events = {
+        {0, SYNTH_EV_NOTE_ON, 309, 69.0f, 1.0f},
+        {2048, SYNTH_EV_NOTE_OFF, 309, 0.0f, 0.0f},
+        {4096, SYNTH_EV_NOTE_ON, 309, 69.0f, 1.0f}
+    };
+    std::vector<Parameters> retriggerParams = lfo_analysis_params(2, 1.0f);
+    retriggerParams.insert(retriggerParams.end(), {{6, 0.0f}, {46, 3.7f}, {48, 1.0f}});
+    std::vector<Parameters> freeParams = retriggerParams;
+    freeParams.push_back({48, 0.0f});
+    const StereoRender retrigger = render_stereo(48000, 128, 6144, events, retriggerParams, 149u);
+    const StereoRender freeRun = render_stereo(48000, 128, 6144, events, freeParams, 149u);
+    size_t retriggerMismatch = 0;
+    size_t freeMismatch = 0;
+    for (uint32_t i = 0; i < 1024; ++i) {
+        if (std::memcmp(&retrigger.left[i], &retrigger.left[4096 + i], sizeof(float)) != 0)
+            ++retriggerMismatch;
+        if (std::memcmp(&freeRun.left[i], &freeRun.left[4096 + i], sizeof(float)) != 0)
+            ++freeMismatch;
+    }
+    const bool ok = retriggerMismatch == 0 && freeMismatch != 0;
+    std::printf("%s 31 LFO retrigger: retrigger_bit_mismatches=%zu free_run_bit_mismatches=%zu\n",
+                ok ? "PASS" : "FAIL", retriggerMismatch, freeMismatch);
+    return ok;
+}
+
+static std::vector<Parameters> all_m1b_params() {
+    std::vector<Parameters> params = full_configuration_params();
+    params.insert(params.end(), {{35, 1.0f}, {36, 4.0f}, {37, 1200.0f}, {38, 0.65f},
+        {39, 0.5f}, {40, 3.0f}, {41, 0.003f}, {42, 0.4f}, {43, 0.25f},
+        {44, 0.3f}, {45, 0.7f}, {46, 7.3f}, {47, 1.0f}, {48, 1.0f},
+        {49, 2.0f}, {50, 37.0f}, {51, 0.4f}, {52, 0.17f}});
+    return params;
+}
+
+static bool test_m1b_block_invariance() {
+    const std::vector<TimedEvent> events = {
+        {0, SYNTH_EV_NOTE_ON, 310, 48.0f, 0.8f},
+        {257, SYNTH_EV_NOTE_ON, 311, 55.0f, 0.6f},
+        {701, SYNTH_EV_PARAM, 37, 2500.0f, 0.0f},
+        {1009, SYNTH_EV_PARAM, 38, 0.8f, 0.0f},
+        {2049, SYNTH_EV_NOTE_OFF, 310, 0.0f, 0.0f},
+        {3073, SYNTH_EV_NOTE_OFF, 311, 0.0f, 0.0f}
+    };
+    const uint32_t blocks[] = {1, 7, 64, 128, 511};
+    const StereoRender reference = render_stereo(
+        48000, blocks[0], 4096, events, all_m1b_params(), 151u);
+    size_t mismatch = 0;
+    for (size_t i = 1; i < sizeof(blocks) / sizeof(blocks[0]); ++i) {
+        const StereoRender comparison = render_stereo(
+            48000, blocks[i], 4096, events, all_m1b_params(), 151u);
+        mismatch += bit_mismatches(reference.left, comparison.left);
+        mismatch += bit_mismatches(reference.right, comparison.right);
+    }
+    const bool ok = !reference.left.empty() && mismatch == 0;
+    std::printf("%s 32 M1b block invariance: blocks=1,7,64,128,511 bit_mismatches=%zu\n",
+                ok ? "PASS" : "FAIL", mismatch);
+    return ok;
+}
+
+static bool test_m1b_reset_determinism() {
+    constexpr uint32_t block = 128;
+    constexpr uint32_t frames = 8192;
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, block);
+    if (engine == nullptr) return false;
+    for (const Parameters& parameter : all_m1b_params())
+        if (synth_set_param(engine, parameter.id, parameter.value) != 0) return false;
+    std::vector<float> firstLeft(frames);
+    std::vector<float> firstRight(frames);
+    std::vector<float> secondLeft(frames);
+    std::vector<float> secondRight(frames);
+    const SynthEvent note{0, SYNTH_EV_NOTE_ON, 312, 52.0f, 0.8f};
+    for (uint32_t pass = 0; pass < 2; ++pass) {
+        synth_reset(engine, SYNTH_RESET_VOICES, 157u);
+        float* left = pass == 0 ? firstLeft.data() : secondLeft.data();
+        float* right = pass == 0 ? firstRight.data() : secondRight.data();
+        for (uint32_t position = 0; position < frames; position += block) {
+            const SynthEvent* event = position == 0 ? &note : nullptr;
+            const uint32_t eventCount = position == 0 ? 1u : 0u;
+            if (synth_process(engine, event, eventCount, left + position, right + position, block) != 0)
+                return false;
+        }
+    }
+    const size_t mismatch = bit_mismatches(firstLeft, secondLeft) +
+                            bit_mismatches(firstRight, secondRight);
+    const bool ok = mismatch == 0;
+    std::printf("%s 33 M1b determinism: reset_render_bit_mismatches=%zu\n",
+                ok ? "PASS" : "FAIL", mismatch);
+    return ok;
+}
+
+static bool test_m1b_performance() {
+    constexpr uint32_t block = 128;
+    constexpr uint32_t iterations = 1000;
+    constexpr double deadline = 2667.0;
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, block);
+    if (engine == nullptr) return false;
+    const std::vector<Parameters> params = {
+        {0, 1.0f}, {2, 0.8f}, {3, 0.0f}, {4, 0.0f}, {5, 1.0f}, {7, 0.05f},
+        {8, 16.0f}, {9, 4.0f}, {10, 12.0f}, {11, 0.8f}, {35, 1.0f},
+        {36, 4.0f}, {37, 1000.0f}, {38, 0.7f}, {46, 5.0f}, {49, 3.0f}
+    };
+    for (const Parameters& parameter : params)
+        if (synth_set_param(engine, parameter.id, parameter.value) != 0) return false;
+    synth_reset(engine, SYNTH_RESET_VOICES, 163u);
+    SynthEvent notes[16]{};
+    for (uint32_t i = 0; i < 16; ++i)
+        notes[i] = SynthEvent{0, SYNTH_EV_NOTE_ON, 400u + i, 36.0f + i * 2.0f, 0.7f};
+    float left[block]{};
+    float right[block]{};
+    if (synth_process(engine, notes, 16, left, right, block) != 0) return false;
+    for (uint32_t i = 0; i < 100; ++i)
+        if (synth_process(engine, nullptr, 0, left, right, block) != 0) return false;
+    std::vector<double> timings;
+    timings.reserve(iterations);
+    double sum = 0.0;
+    for (uint32_t i = 0; i < iterations; ++i) {
+        const auto start = std::chrono::steady_clock::now();
+        const int result = synth_process(engine, nullptr, 0, left, right, block);
+        const auto stop = std::chrono::steady_clock::now();
+        if (result != 0) return false;
+        const double micros = std::chrono::duration<double, std::micro>(stop - start).count();
+        timings.push_back(micros);
+        sum += micros;
+    }
+    std::sort(timings.begin(), timings.end());
+    const double average = sum / iterations;
+    const double p99 = timings[static_cast<size_t>(iterations * 0.99)];
+    const bool ok = std::isfinite(average) && std::isfinite(p99) &&
+                    p99 < deadline * 0.5;
+    std::printf("%s 34 M1b performance: voices=16 unison=4 LP24 average_us=%.6f p99_us=%.6f half_deadline_us=%.6f\n",
+                ok ? "PASS" : "FAIL", average, p99, deadline * 0.5);
+    return ok;
+}
+
 int main() {
     uint32_t passed = 0;
     passed += test_block_invariance();
@@ -857,6 +1377,19 @@ int main() {
     passed += test_parameter_sweep();
     passed += test_performance();
     passed += test_extended_block_invariance();
-    std::printf("SUMMARY passed=%u failed=%u total=21\n", passed, 21u - passed);
-    return passed == 21 ? 0 : 1;
+    passed += test_m1b_bypass_golden();
+    passed += test_filter_cutoff_accuracy();
+    passed += test_filter_slopes();
+    passed += test_filter_resonance_peak();
+    passed += test_filter_self_oscillation_stability();
+    passed += test_filter_fast_modulation_stability();
+    passed += test_filter_key_tracking();
+    passed += test_filter_envelope_centroid();
+    passed += test_lfo_shapes();
+    passed += test_lfo_retrigger();
+    passed += test_m1b_block_invariance();
+    passed += test_m1b_reset_determinism();
+    passed += test_m1b_performance();
+    std::printf("SUMMARY passed=%u failed=%u total=34\n", passed, 34u - passed);
+    return passed == 34 ? 0 : 1;
 }

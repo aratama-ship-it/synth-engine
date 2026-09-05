@@ -1,7 +1,8 @@
-# Synth Engine M1a
+# Synth Engine M1b
 
 SPEC_M0a.md の縦切りスパイクに、SPEC_M1a.md のWT OSC A/B、ユニゾン、B→A位相変調、
-サブ、ノイズを追加した実装です。第三者コードや外部ライブラリを含まず、DSPコアは
+サブ、ノイズ、およびSPEC_M1b.mdのTPT/ZDF SVF、フィルタEG、LFOを追加した実装です。
+第三者コードや外部ライブラリを含まず、DSPコアは
 C++標準ライブラリ、動的確保、例外、RTTI、ロックを使いません。公開面は
 core/include/synth_engine.h のC ABIです。
 
@@ -21,6 +22,8 @@ core/include/synth_engine.h のC ABIです。
     make cli
     build/render-cli --preset presets/m0_saw.txt --events fixtures/m0_events_chord.txt \
       --out build/out.wav --sr 48000 --block 128 --frames 96000
+    build/render-cli --preset presets/m1b_filter_sweep.txt --events fixtures/m0_events_chord.txt \
+      --out build/m1b_filter_sweep.wav --sr 48000 --block 128 --frames 96000
     make core-freestanding-check
 
 生成物はすべて build/ 配下に置かれます。CLIは32-bit float、ステレオのWAVを出力し、
@@ -35,6 +38,67 @@ core/include/synth_engine.h のC ABIです。
 内蔵wavetableのslotは 0 basic（sine→triangle→saw→squareの4フレーム）、
 1 saw、2 square、3 triangleです。slot 0だけがmorphでフレーム間を移動します。
 
+## パラメータ一覧（engine version 3）
+
+| ID | 名前 | 範囲 | 既定 |
+|---:|---|---:|---:|
+| 0 | oscAWavetable | 0..3 | 0 |
+| 1 | oscAMorph | 0..1 | 0 |
+| 2 | oscALevel | 0..4 | 0.8 |
+| 3 | ampAttack | 0..60 s | 0.005 |
+| 4 | ampDecay | 0..60 s | 0.1 |
+| 5 | ampSustain | 0..1 | 0.8 |
+| 6 | ampRelease | 0..60 s | 0.2 |
+| 7 | masterGain | 0..4 | 0.2 |
+| 8 | voiceCount | 1..16 int | 16 |
+| 9 | oscAUnison | 1..4 int | 1 |
+| 10 | oscADetune | 0..50 cent | 10 |
+| 11 | oscAWidth | 0..1 | 0.5 |
+| 12 | oscAOctave | -2..2 int | 0 |
+| 13 | oscASemitone | -12..12 int | 0 |
+| 14 | oscAFine | -100..100 cent | 0 |
+| 15 | oscAPhaseMode | 0..1 int | 0 |
+| 16 | oscAPhase | 0..1 | 0 |
+| 17 | oscBWavetable | 0..3 int | 0 |
+| 18 | oscBMorph | 0..1 | 0 |
+| 19 | oscBLevel | 0..4 | 0 |
+| 20 | oscBUnison | 1..4 int | 1 |
+| 21 | oscBDetune | 0..50 cent | 10 |
+| 22 | oscBWidth | 0..1 | 0.5 |
+| 23 | oscBOctave | -2..2 int | 0 |
+| 24 | oscBSemitone | -12..12 int | 0 |
+| 25 | oscBFine | -100..100 cent | 0 |
+| 26 | oscBPhaseMode | 0..1 int | 0 |
+| 27 | oscBPhase | 0..1 | 0 |
+| 28 | fmBToA | 0..1 | 0 |
+| 29 | subLevel | 0..4 | 0 |
+| 30 | subShape | 0..2 int | 0 |
+| 31 | subOctave | -2..0 int | -1 |
+| 32 | noiseLevel | 0..4 | 0 |
+| 33 | noiseColor | 0..1 int | 0 |
+| 34 | noiseDecay | 0..60 s | 0.05 |
+| 35 | filterEnabled | 0..1 int | 0 |
+| 36 | filterMode | 0..5 int | 0 |
+| 37 | filterCutoff | 20..20000 Hz | 20000 |
+| 38 | filterResonance | 0..1 | 0 |
+| 39 | filterKeyTrack | 0..1 | 0 |
+| 40 | filterEnvAmount | -8..8 oct | 0 |
+| 41 | filterEgAttack | 0..20 s | 0.005 |
+| 42 | filterEgDecay | 0..20 s | 0.2 |
+| 43 | filterEgSustain | 0..1 | 1 |
+| 44 | filterEgRelease | 0..20 s | 0.2 |
+| 45 | filterVelToEnv | 0..1 | 0 |
+| 46 | lfoRate | 0.01..40 Hz | 1 |
+| 47 | lfoShape | 0..5 int | 0 |
+| 48 | lfoRetrigger | 0..1 int | 0 |
+| 49 | lfoToCutoff | -8..8 oct | 0 |
+| 50 | lfoToPitch | -1200..1200 cent | 0 |
+| 51 | lfoToAmp | 0..1 | 0 |
+| 52 | lfoPhase | 0..1 | 0 |
+
+filterModeは0=LP12、1=BP12、2=HP12、3=Notch、4=LP24、5=HP24です。
+lfoShapeは0=sine、1=triangle、2=saw上行、3=saw下行、4=square、5=S&Hです。
+
 ## WASM
 
 WASM_CLANG が未設定なら成功扱いでskipを表示します。LLVM clangのパスを指定する一般形:
@@ -45,7 +109,7 @@ WASM_CLANG が未設定なら成功扱いでskipを表示します。LLVM clang�
 
     WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang make wasm
 
-## テスト21項目
+## テスト34項目
 
 tests/test_main.cpp はフレームワークを使わず、次を測定します。
 
@@ -67,9 +131,22 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 16. サブの周波数ピーク
 17. ノイズ減衰とseed決定論
 18. 100 Hz〜10 kHzのピンクノイズ傾斜
-19. 全35パラメータのmin/default/maxスイープ
+19. 全53パラメータのmin/default/maxスイープ
 20. 16音・両OSC 4 unison・サブ・ノイズの処理時間
 21. M1a全構成のblock 1/7/64/128/511ビット一致
+22. M0 saw／M1 unisonの変更前ゴールデンWAVとのビット一致
+23. LP12の200／1000／5000 Hzにおける−3 dB点
+24. LP12／LP24の阻止帯域スロープ
+25. resonance 0.8のカットオフ付近のピーク差
+26. resonance 1・無入力・10秒の安定性
+27. 40 Hz LFO・±8 octave・LP24の高速変調安定性
+28. C3／C4の1:1キートラック倍率
+29. filterEnvAmount 4・decay 0.3秒のスペクトル重心比
+30. LFO 6波形の範囲・周期とS&H決定論
+31. LFOリトリガー／フリーランの位相挙動
+32. フィルタ＋LFO有効時のblock 1/7/64/128/511ビット一致
+33. 全M1b機能有効時のreset後レンダー決定論
+34. LP24・LFO・16音×unison 4の平均／p99処理時間と期限判定
 
 エイリアス測定は4-term Blackman-Harris窓を使い、基音電力に対する「基音より上、かつ
 期待される第1〜4倍音の各±10 binを除いた電力」の比です。MIDI 108では選択される
@@ -83,6 +160,15 @@ mipの倍音上限が4のため、この4倍音を期待成分とします。
 - B→A位相変調は全開で2 cycle
 - ピンクノイズは20 Hz / 200 Hz / 2 kHzの1極LPFを1.0 / 0.32 / 0.10で加算
 - パラメータ範囲外はclamp、NaNと未知IDはエラー
+
+## M1bで確定した事項
+
+- TPT/ZDF SVFはボイスごとに置き、12 dBモードは1段、24 dBモードは同係数2段直列
+- filterCutoffとfilterResonanceは5 msの一次スムーサを通し、create/reset時は目標値へスナップ
+- フィルタEGはアンプEGと独立し、アンプEGだけがボイス解放を決める
+- LFOはsine／triangle／saw上行／saw下行／square／S&Hの6波形
+- LFOはフリーラン時にエンジン共通、リトリガー時にボイス単位で、cutoff／pitch／ampへ直結
+- filterEnabled=0かつLFO送り先3つが0ならM0/M1aの既存信号経路を通り、変更前WAVとビット一致
 
 ## 未決事項
 
@@ -104,6 +190,26 @@ SPECにないため、以下は公開仕様として確定していません。�
   （VOICESはパラメータ保持、ALLはM0a初期値へ戻す）
 - カスタムwavetable読込時の振幅正規化（入力のFourier再構成振幅を保持）
 - 簡易エイリアス測定の窓、除外bin幅、集計帯域（上記のテスト定義）
+- ステレオ化されたボイス信号に対するSVF状態の共有規則
+  （現在は左右の定位を保つため、各ボイスの左右チャンネルごとに独立した2段の状態を持つ）
+- filterEnabledを発音中にOFF→ONした場合のSVF状態の初期化規則
+  （現在はOFF中に状態を更新せず、直前の状態を保持して再開）
+- lfoRetriggerを発音中に変更した場合の位相引き継ぎ規則
+  （現在は各ボイス位相とエンジン共通位相を常時保持し、変更時点で選ばれた側を使う）
+- lfoPhaseを発音中に変更した場合の即時反映規則
+  （現在はreset時またはリトリガーnote-on時の開始位置にだけ使う）
+- S&Hのreset／note-on直後、最初のwrap前に保持する値とglobal識別値
+  （現在はcycleIndex 0をhashし、globalはvoiceIndex 0xffffffff、layerは32）
+- S&HのcycleIndexが2^32を超えた後のhash規則
+  （現在はhash入力にcycleIndexの下位32 bitを使う）
+- `m1b_filter_sweep` のSPEC未指定値
+  （現在はcutoff 200 Hz、filterEgSustain 0）
+- `m1b_wobble` のSPEC未指定値
+  （現在はcutoff 1000 Hz、resonance 0、sine LFO）
+- テスト23〜30でSPECが指定していない測定用パラメータ
+  （現在は23/28の−3 dB測定をresonance 0.294415、24をcutoff 1000 Hz・resonance 0、
+  25をLP12・cutoff 1000 Hz、26をLP12・cutoff 1000 Hz、27をcutoff 1000 Hz、
+  29をLP24・cutoff 200 Hz・sustain 0、30をrate 5 Hzで実行）
 
 ## native と wasm の比較（Claude追記 2026-09-04）
 
