@@ -19,6 +19,7 @@ struct Options {
     const char* preset = nullptr;
     const char* events = nullptr;
     const char* output = nullptr;
+    const char* sendOutput = nullptr;
     uint32_t sampleRate = 48000;
     uint32_t block = 128;
     uint64_t frames = 0;
@@ -26,7 +27,8 @@ struct Options {
 
 static void usage(const char* program) {
     std::fprintf(stderr,
-        "usage: %s --preset FILE --events FILE --out FILE --sr HZ --block N --frames N\n",
+        "usage: %s --preset FILE --events FILE --out FILE [--send-out FILE] "
+        "--sr HZ --block N --frames N\n",
         program);
 }
 
@@ -38,6 +40,7 @@ static bool parse_options(int argc, char** argv, Options& options) {
         if (std::strcmp(key, "--preset") == 0) options.preset = value;
         else if (std::strcmp(key, "--events") == 0) options.events = value;
         else if (std::strcmp(key, "--out") == 0) options.output = value;
+        else if (std::strcmp(key, "--send-out") == 0) options.sendOutput = value;
         else if (std::strcmp(key, "--sr") == 0)
             options.sampleRate = static_cast<uint32_t>(std::strtoul(value, nullptr, 10));
         else if (std::strcmp(key, "--block") == 0)
@@ -163,6 +166,9 @@ int main(int argc, char** argv) {
     }
     std::vector<float> left(options.frames);
     std::vector<float> right(options.frames);
+    const bool renderSend = options.sendOutput != nullptr;
+    std::vector<float> sendLeft(renderSend ? options.frames : 0);
+    std::vector<float> sendRight(renderSend ? options.frames : 0);
     std::vector<SynthEvent> blockEvents;
     uint64_t position = 0;
     while (position < options.frames) {
@@ -177,12 +183,19 @@ int main(int argc, char** argv) {
                 });
             }
         }
-        const int result = synth_process(engine,
-            blockEvents.empty() ? nullptr : blockEvents.data(),
-            static_cast<uint32_t>(blockEvents.size()), left.data() + position,
-            right.data() + position, count);
+        const int result = renderSend
+            ? synth_process_send(engine,
+                blockEvents.empty() ? nullptr : blockEvents.data(),
+                static_cast<uint32_t>(blockEvents.size()), left.data() + position,
+                right.data() + position, sendLeft.data() + position,
+                sendRight.data() + position, count)
+            : synth_process(engine,
+                blockEvents.empty() ? nullptr : blockEvents.data(),
+                static_cast<uint32_t>(blockEvents.size()), left.data() + position,
+                right.data() + position, count);
         if (result != 0) {
-            std::fprintf(stderr, "error: synth_process returned %d\n", result);
+            std::fprintf(stderr, "error: %s returned %d\n",
+                renderSend ? "synth_process_send" : "synth_process", result);
             return 1;
         }
         position += count;
@@ -201,6 +214,10 @@ int main(int argc, char** argv) {
     }
     if (!write_wav(options.output, left, right, options.sampleRate)) {
         std::fprintf(stderr, "error: could not write WAV\n");
+        return 1;
+    }
+    if (renderSend && !write_wav(options.sendOutput, sendLeft, sendRight, options.sampleRate)) {
+        std::fprintf(stderr, "error: could not write send WAV\n");
         return 1;
     }
     const double rms = std::sqrt(sumSquares / static_cast<double>(left.size()));

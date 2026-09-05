@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { importSource } from "./load-module.mjs";
 
-const { AbsoluteEventRing } = await importSource("../synth-worklet.js");
+const { AbsoluteEventRing, SynthEngineProcessor } = await importSource("../synth-worklet.js");
 
 const event = (frame, id) => ({ frame, kind: 1, id, a: 60 + id, b: 0.8 });
 
@@ -28,6 +28,37 @@ test("Worklet ring preserves insertion order at the same offset", () => {
   const ring = new AbsoluteEventRing(4);
   ring.pushMany([event(10, 3), event(10, 1), event(10, 2)]);
   assert.deepEqual(ring.takeBlock(0, 128).map(({ id }) => id), [3, 1, 2]);
+});
+
+test("Worklet converts voiceParam messages at the next block and orders them before NOTE_ON", () => {
+  const processor = Object.create(SynthEngineProcessor.prototype);
+  processor.ring = new AbsoluteEventRing(8);
+  processor.renderFrame = 256;
+  processor.applyMessage({ type: "events", events: [event(256, 60)] });
+  processor.applyMessage({ type: "voiceParam", params: [[37, 4000], [75, 0.5]] });
+
+  assert.deepEqual(
+    processor.ring.takeBlock(256, 128).map(({ offset, kind, id, a, b }) => ({ offset, kind, id, a, b })),
+    [
+      { offset: 0, kind: 5, id: 37, a: 4000, b: 0 },
+      { offset: 0, kind: 5, id: 75, a: 0.5, b: 0 },
+      { offset: 0, kind: 1, id: 60, a: 120, b: 0.8 },
+    ],
+  );
+});
+
+test("events messages accept kind 5 and retain an explicit absolute frame", () => {
+  const processor = Object.create(SynthEngineProcessor.prototype);
+  processor.ring = new AbsoluteEventRing(4);
+  processor.renderFrame = 0;
+  processor.applyMessage({
+    type: "events",
+    events: [{ frame: 513, kind: 5, id: 37, a: 4000, b: 0 }],
+  });
+  assert.deepEqual(
+    processor.ring.takeBlock(512, 128).map(({ offset, kind, id, a }) => ({ offset, kind, id, a })),
+    [{ offset: 1, kind: 5, id: 37, a: 4000 }],
+  );
 });
 
 test("Worklet ring wraps and rejects a batch that exceeds fixed capacity", () => {

@@ -91,8 +91,8 @@ export async function createSynthNode(context, wasmBytes) {
 
   const audioNode = new AudioWorkletNode(context, "synth-engine", {
     numberOfInputs: 0,
-    numberOfOutputs: 1,
-    outputChannelCount: [2],
+    numberOfOutputs: 2,
+    outputChannelCount: [2, 2],
     processorOptions: { wasmBytes },
   });
   let nextMessageId = 1;
@@ -123,8 +123,11 @@ export async function createSynthNode(context, wasmBytes) {
 
   return {
     audioNode,
-    connect(destination) {
-      return audioNode.connect(destination);
+    get sendOutput() {
+      return 1;
+    },
+    connect(destination, outputIndex = 0) {
+      return audioNode.connect(destination, outputIndex);
     },
     disconnect() {
       return audioNode.disconnect();
@@ -134,6 +137,15 @@ export async function createSynthNode(context, wasmBytes) {
     },
     noteOff(note, atFrame = defaultFrame(context)) {
       postEvents([{ frame: atFrame, kind: 2, id: note, a: 0, b: 0 }]);
+    },
+    voiceParam(params, atFrame = defaultFrame(context)) {
+      audioNode.port.postMessage({ type: "voiceParam", params, frame: atFrame });
+    },
+    noteOnWith(note, velocity, params, atFrame) {
+      postEvents([
+        ...params.map(([id, value]) => ({ frame: atFrame, kind: 5, id, a: value, b: 0 })),
+        { frame: atFrame, kind: 1, id: note, a: note, b: velocity },
+      ]);
     },
     setParam(id, value) {
       audioNode.port.postMessage({ type: "preset", params: [[id, value]] });

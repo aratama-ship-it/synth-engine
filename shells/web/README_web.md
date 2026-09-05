@@ -1,4 +1,4 @@
-# SynthEngine Web shell (M0c)
+# SynthEngine Web shell (M3b-1)
 
 `build/synth_engine.wasm` の DSP コアを、第三者 JavaScript ライブラリなしで `AudioWorkletProcessor` から駆動する検証用 Web shell。
 
@@ -21,10 +21,28 @@ Chromium 系ブラウザで次を開く。
 
 1. 画面左上に `v0.1.0`、状態欄に「準備完了」と出ることを確認する。
 2. 「開始」を押し、A〜Z キーを押している間だけ発音することを確認する（A=60、アルファベット順に半音上昇）。
-3. 「オフライン10秒レンダー」を押す。
-4. `synth-engine-web-10s.wav` が生成され、画面の `nan` が 0 になることを確認する。
-5. native 比較が最大 −100 dBFS 以下、RMS −120 dBFS 以下であることを確認する。
-6. WASM サイズ、batch ready、`process()` の average / p99 が画面に出ることを確認する。性能値は直近最大1000ブロックを対象にし、100ブロックごとに更新する。
+3. 「音符ごとの上書きを試す」を押し、同じ3音のうち2音目だけ明るいことを確認する。
+4. 「センドを試す」を押し、同じ3音のうち2音目だけディレイ付きになることを確認する。
+5. 「オフライン10秒レンダー」を押す。
+6. `synth-engine-web-10s.wav` が生成され、画面の `nan` が 0 になることを確認する。
+7. native 比較が最大 −100 dBFS 以下、RMS −120 dBFS 以下であることを確認する。
+8. WASM サイズ、batch ready、`process()` の average / p99 が画面に出ることを確認する。性能値は直近最大1000ブロックを対象にし、100ブロックごとに更新する。
+
+## M3b-1 API
+
+```js
+const frame = Math.ceil(context.currentTime * context.sampleRate);
+synth.voiceParam([[37, 4000]], frame);
+synth.noteOnWith(60, 0.8, [[37, 4000], [75, 1]], frame);
+
+synth.connect(context.destination);          // 既定どおり dry（出力0）
+synth.connect(delayInput, synth.sendOutput); // sendOutput は出力番号1
+// 上と同じ指定: synth.connect(delayInput, 1)
+```
+
+MessagePortへ直接送る場合は`{type:"voiceParam", params:[[id, value], ...], frame?}`を使う。`frame`省略時はWorkletが次に処理するブロックの先頭へ置く。`{type:"events"}`と`batch`のイベント配列も`kind:5`を受け付ける。同一フレームでは`VOICE_PARAM`をNOTE_ONより前へ並べる。
+
+`connect(destination, outputIndex = 0)`の第2引数は省略可能であり、従来の`connect(destination)`はdry出力へ接続する。
 
 単体テスト:
 
@@ -38,12 +56,20 @@ WASM と native CLI の Node 比較:
 node tools/wasm-check/compare.mjs build/synth_engine.wasm presets/m0_saw.txt fixtures/m0_events_chord.txt build/out.wav 48000 128 96000
 ```
 
+VOICE_PARAMとdry/send出力をCLIとビット比較:
+
+```sh
+node tools/web-voiceparam-check.mjs
+```
+
+`render-cli`は通常の`--out FILE`に加え、必要な場合だけ`--send-out FILE`でステレオFloat32 WAVのセンド出力を書き出せる。
+
 ## 実測値
 
 | 項目 | 値 | 環境・備考 |
 |---|---:|---|
-| WASM raw | 10,448 B | `wc -c build/synth_engine.wasm`、2026-09-04実測 |
-| WASM gzip | 4,003 B | `gzip -c build/synth_engine.wasm \| wc -c`、2026-09-04実測 |
+| WASM raw | 49,898 B | `wc -c build/synth_engine.wasm`、2026-09-06実測 |
+| WASM gzip | 15,047 B | `gzip -c build/synth_engine.wasm \| wc -c`、2026-09-06実測 |
 | batch `ready` | ブラウザ確認後に記録 | Worklet 内 `WebAssembly.instantiate` 開始から batch 適用可能になるまで |
 | `process()` average | ブラウザ確認後に記録 | `performance.now()`、直近最大1000ブロック |
 | `process()` p99 | ブラウザ確認後に記録 | 同上 |
@@ -53,7 +79,7 @@ node tools/wasm-check/compare.mjs build/synth_engine.wasm presets/m0_saw.txt fix
 ## 実装上の固定事項
 
 - Worklet は `processorOptions.wasmBytes` だけを受け取り、Worklet 内では `fetch` しない。
-- `__heap_base` 以降に state、4096イベント分、左右出力（最大512フレーム）を16-byte境界で配置する。不足時だけ初期化中に `memory.grow` する。
+- `__heap_base` 以降に state、4096イベント分、dry左右、send左右（各最大512フレーム）を16-byte境界で配置する。不足時だけ初期化中に `memory.grow` する。
 - オフライン batch は `reset(ALL) → preset → reset(VOICES) → events` の順で投入する。`reset(ALL)` がパラメータを初期値へ戻すため、この順序を崩さない。
 - エラー時は MessagePort へ `{type:"error"}` を送り、出力を無音に保つ。
 
@@ -72,7 +98,7 @@ node tools/wasm-check/compare.mjs build/synth_engine.wasm presets/m0_saw.txt fix
 
 ## 未決事項
 
-SPEC M0c に規定がなく、製品仕様としては未確定の事項。M0c では括弧内の暫定挙動にしている。
+SPEC M0c / M3b-1 に規定がなく、製品仕様としては未確定の事項。括弧内は現在の暫定挙動。
 
 - リアルタイムイベントの先読み量と遅延許容値（現在は `AudioContext.currentTime` から得たフレームを送り、到着済みの過去イベントは次ブロックの offset 0 に丸める）。
 - リング満杯時の復旧方針（現在は batch を部分投入せず error にして以後無音）。
@@ -84,8 +110,9 @@ SPEC M0c に規定がなく、製品仕様としては未確定の事項。M0c �
 - オフライン sample rate を端末値へ合わせるか（現在は fixture / native CLI と比較可能な48 kHz固定）。
 - ライブ Worklet 初期化完了を専用メッセージで通知するか（現在はエラーだけ通知し、batch のときだけ `ready` を返す）。
 - AudioWorkletNode の明示的な終了・再生成 API（現在はページの AudioContext のライフサイクルに従う）。
+- `sendOutput` getterの返却型（SPEC M3b-1は型を規定していないため、現在は`connect(destination, outputIndex)`へ渡せる出力番号`1`を返す）。
 
-ブラウザでの発音、ダウンロード、性能値はこの実装作業では未確認。Claude の Browser pane で確認する。
+2026-09-06にヘッドレスChromiumで、新しい2操作の完了、10秒オフラインレンダー、WAVダウンロード、nativeビット一致、page error 0、デスクトップ/390px幅の描画を確認した。確認音の「2音目だけ明るい／ディレイ付き」という聴感差は人の耳では未確認。
 
 ## Claude の実機検証（Chromium、2026-09-04）
 

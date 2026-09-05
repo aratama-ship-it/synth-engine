@@ -8,6 +8,36 @@ const paths = {
 };
 const sampleRate = 48000;
 const durationSeconds = 10;
+const probePresetText = `
+0=1
+1=0
+2=1
+3=0
+4=0
+5=1
+6=0
+7=0.5
+9=1
+15=1
+16=0.25
+19=0
+29=0
+32=0
+35=1
+36=4
+37=400
+38=0
+39=0
+40=0
+41=0
+42=0
+43=1
+44=0
+49=0
+50=0
+51=0
+75=0
+`;
 const commonParameterIds = new Set([1, 2, 3, 4, 5, 6, 7, 37, 38, 40, 46, 49]);
 const elements = Object.fromEntries(
   [...document.querySelectorAll("[id]")].map((element) => [element.id, element]),
@@ -16,6 +46,8 @@ const elements = Object.fromEntries(
 let wasmBytes;
 let liveContext;
 let liveSynth;
+let probeSynth;
+let probeNodes;
 const heldKeys = new Set();
 const parameterValues = new Map();
 const touchedParameters = new Set();
@@ -150,6 +182,63 @@ async function startLive() {
     liveContext = undefined;
     liveSynth = undefined;
     elements["start-button"].disabled = false;
+    setStatus(error.message, true);
+  }
+}
+
+async function ensureProbeSynth() {
+  await startLive();
+  if (!liveContext || !liveSynth) throw new Error("AudioContext を開始できませんでした。");
+  if (probeSynth) return probeSynth;
+
+  probeSynth = await createSynthNode(liveContext, wasmBytes.slice(0));
+  observeWorklet(probeSynth);
+  probeSynth.connect(liveContext.destination);
+
+  const delay = liveContext.createDelay(2);
+  const feedback = liveContext.createGain();
+  const wet = liveContext.createGain();
+  delay.delayTime.value = 0.32;
+  feedback.gain.value = 0.45;
+  wet.gain.value = 0.8;
+  delay.connect(feedback);
+  feedback.connect(delay);
+  delay.connect(wet);
+  wet.connect(liveContext.destination);
+  probeSynth.connect(delay, probeSynth.sendOutput);
+  probeNodes = { delay, feedback, wet };
+  return probeSynth;
+}
+
+function setProbeButtonsDisabled(disabled) {
+  elements["voice-param-button"].disabled = disabled;
+  elements["send-button"].disabled = disabled;
+}
+
+async function playProbe(params, description) {
+  setProbeButtonsDisabled(true);
+  try {
+    const synth = await ensureProbeSynth();
+    synth.reset(1, 281);
+    synth.loadPreset(probePresetText);
+    synth.reset(0, 281);
+
+    const base = Math.ceil((liveContext.currentTime + 0.2) * liveContext.sampleRate);
+    const interval = Math.round(0.65 * liveContext.sampleRate);
+    const duration = Math.round(0.28 * liveContext.sampleRate);
+    synth.noteOn(60, 1, base);
+    synth.noteOff(60, base + duration);
+    synth.noteOnWith(60, 1, params, base + interval);
+    synth.noteOff(60, base + interval + duration);
+    synth.noteOn(60, 1, base + interval * 2);
+    synth.noteOff(60, base + interval * 2 + duration);
+    setStatus(`${description} 同じ音を3回鳴らします。2音目を聴き比べてください。`);
+    setTimeout(() => {
+      setProbeButtonsDisabled(false);
+      if (!elements.status.classList.contains("error")) setStatus(`${description} 確認音の再生が完了しました。`);
+    }, 2200);
+  } catch (error) {
+    setProbeButtonsDisabled(false);
     setStatus(error.message, true);
   }
 }
@@ -318,8 +407,15 @@ async function renderOffline() {
 }
 
 elements["start-button"].addEventListener("click", startLive);
+elements["voice-param-button"].addEventListener("click", () => {
+  playProbe([[37, 4000]], "音符ごとの上書き:");
+});
+elements["send-button"].addEventListener("click", () => {
+  playProbe([[75, 1]], "センド出力:");
+});
 elements["render-button"].addEventListener("click", renderOffline);
 elements["render-button"].disabled = true;
+setProbeButtonsDisabled(true);
 
 try {
   wasmBytes = await fetchChecked(paths.wasm);
@@ -328,8 +424,10 @@ try {
   const compressed = await gzipSize(wasmBytes);
   elements["wasm-gzip"].textContent = compressed === null ? "未対応" : formatBytes(compressed);
   elements["render-button"].disabled = false;
-  setStatus("準備完了。「開始」または「オフライン10秒レンダー」を選んでください。");
+  setProbeButtonsDisabled(false);
+  setStatus("準備完了。開始、2つの確認音、またはオフライン10秒レンダーを選んでください。");
 } catch (error) {
   elements["start-button"].disabled = true;
+  setProbeButtonsDisabled(true);
   setStatus(error.message, true);
 }

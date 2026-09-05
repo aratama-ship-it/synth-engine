@@ -6,6 +6,7 @@ const nowMs = (typeof performance !== "undefined" && typeof performance.now === 
 const EVENT_BYTES = 20;
 const EVENT_CAPACITY = 4096;
 const MAX_BLOCK = 512;
+const VOICE_PARAM_KIND = 5;
 
 function align16(value) {
   return (value + 15) & ~15;
@@ -22,6 +23,25 @@ function normalizeEvent(event, sequence = 0) {
   if (!Number.isInteger(id) || id < 0) throw new Error("event.id must be a non-negative integer");
   if (!Number.isFinite(a) || !Number.isFinite(b)) throw new Error("event a/b must be finite");
   return { frame, kind, id, a, b, sequence };
+}
+
+export function voiceParamEvents(params, frame) {
+  if (!Array.isArray(params)) throw new Error("voiceParam.params must be an array");
+  const absoluteFrame = Number(frame);
+  if (!Number.isSafeInteger(absoluteFrame) || absoluteFrame < 0) {
+    throw new Error("voiceParam.frame must be a non-negative safe integer");
+  }
+  return params.map((pair) => {
+    if (!Array.isArray(pair) || pair.length !== 2) {
+      throw new Error("each voiceParam parameter must be [id, value]");
+    }
+    const id = Number(pair[0]);
+    const value = Number(pair[1]);
+    if (!Number.isInteger(id) || id < 0 || !Number.isFinite(value)) {
+      throw new Error("invalid voiceParam parameter");
+    }
+    return { frame: absoluteFrame, kind: VOICE_PARAM_KIND, id, a: value, b: 0 };
+  });
 }
 
 export class AbsoluteEventRing {
@@ -74,7 +94,12 @@ export class AbsoluteEventRing {
         this.length += 1;
       }
     }
-    due.sort((left, right) => (left.offset - right.offset) || (left.sequence - right.sequence));
+    due.sort((left, right) => {
+      const frameOrder = left.offset - right.offset;
+      if (frameOrder !== 0) return frameOrder;
+      const kindOrder = Number(right.kind === VOICE_PARAM_KIND) - Number(left.kind === VOICE_PARAM_KIND);
+      return kindOrder || (left.sequence - right.sequence);
+    });
     return due;
   }
 }
@@ -124,12 +149,14 @@ export class SynthEngineProcessor extends ProcessorBase {
       this.eventPtr = this.statePtr + align16(stateSize);
       this.outLPtr = this.eventPtr + EVENT_CAPACITY * EVENT_BYTES;
       this.outRPtr = this.outLPtr + MAX_BLOCK * 4;
-      const requiredBytes = this.outRPtr + MAX_BLOCK * 4;
+      this.sendLPtr = this.outRPtr + MAX_BLOCK * 4;
+      this.sendRPtr = this.sendLPtr + MAX_BLOCK * 4;
+      const requiredBytes = this.sendRPtr + MAX_BLOCK * 4;
       if (requiredBytes > this.memory.buffer.byteLength) {
         this.memory.grow(Math.ceil((requiredBytes - this.memory.buffer.byteLength) / 65536));
       }
 
-      this.engine = this.exports.synth_create(this.statePtr, stateSize, sampleRate, MAX_BLOCK);
+      this.engine = this.exports.synth_create(this.statePtr, stateSize, globalThis.sampleRate, MAX_BLOCK);
       if (!this.engine) throw new Error("synth_create failed");
       this.ready = true;
       this.instantiateMs = nowMs() - started;
@@ -187,6 +214,13 @@ export class SynthEngineProcessor extends ProcessorBase {
       case "events":
         if (!this.ring.pushMany(message.events)) throw new Error(`event ring capacity exceeded (${EVENT_CAPACITY})`);
         break;
+      case "voiceParam": {
+        const frame = message.frame === undefined ? this.renderFrame : message.frame;
+        if (!this.ring.pushMany(voiceParamEvents(message.params, frame))) {
+          throw new Error(`event ring capacity exceeded (${EVENT_CAPACITY})`);
+        }
+        break;
+      }
       case "reset": {
         const kind = Number(message.kind);
         if (!Number.isInteger(kind) || (kind !== 0 && kind !== 1)) throw new Error("reset.kind must be 0 or 1");
@@ -233,8 +267,9 @@ export class SynthEngineProcessor extends ProcessorBase {
 
   process(_inputs, outputs) {
     this.zero(outputs);
-    const output = outputs[0];
-    const frameCount = output?.[0]?.length ?? 0;
+    const dryOutput = outputs[0];
+    const sendOutput = outputs[1];
+    const frameCount = dryOutput?.[0]?.length ?? 0;
     if (frameCount === 0 || this.failed) return true;
     if (!this.ready) {
       this.renderFrame += frameCount;
@@ -258,17 +293,21 @@ export class SynthEngineProcessor extends ProcessorBase {
         data.setFloat32(pointer + 12, event.a, true);
         data.setFloat32(pointer + 16, event.b, true);
       }
-      const result = this.exports.synth_process(
+      const result = this.exports.synth_process_send(
         this.engine,
         this.eventPtr,
         events.length,
         this.outLPtr,
         this.outRPtr,
+        this.sendLPtr,
+        this.sendRPtr,
         frameCount,
       );
-      if (result < 0) throw new Error(`synth_process failed: ${result}`);
-      output[0].set(new Float32Array(this.memory.buffer, this.outLPtr, frameCount));
-      if (output[1]) output[1].set(new Float32Array(this.memory.buffer, this.outRPtr, frameCount));
+      if (result < 0) throw new Error(`synth_process_send failed: ${result}`);
+      dryOutput[0].set(new Float32Array(this.memory.buffer, this.outLPtr, frameCount));
+      if (dryOutput[1]) dryOutput[1].set(new Float32Array(this.memory.buffer, this.outRPtr, frameCount));
+      if (sendOutput?.[0]) sendOutput[0].set(new Float32Array(this.memory.buffer, this.sendLPtr, frameCount));
+      if (sendOutput?.[1]) sendOutput[1].set(new Float32Array(this.memory.buffer, this.sendRPtr, frameCount));
       this.renderFrame += frameCount;
       this.reportTiming(nowMs() - started);
     } catch (error) {

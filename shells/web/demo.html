@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SynthEngine Web M0c</title>
+  <title>SynthEngine Web M3b-1</title>
   <style>
     :root {
       --color-bg: #11130f;
@@ -119,9 +119,11 @@
     <span class="version">v0.1.0</span>
   </header>
   <main>
-    <p class="lead">同じ DSP コアを AudioWorklet で鳴らし、10秒のオフライン出力を native CLI と数値比較する M0c 検証画面です。</p>
+    <p class="lead">同じ DSP コアを AudioWorklet で鳴らし、音符ごとの上書きとセンド出力、10秒のオフライン出力を確認する検証画面です。</p>
     <div class="controls">
       <button id="start-button" type="button">開始</button>
+      <button id="voice-param-button" class="secondary" type="button">音符ごとの上書きを試す</button>
+      <button id="send-button" class="secondary" type="button">センドを試す</button>
       <button id="render-button" class="secondary" type="button">オフライン10秒レンダー</button>
     </div>
     <p id="status" class="status" role="status" aria-live="polite">WASM を読み込んでいます…</p>
@@ -131,6 +133,7 @@
         <h2>LIVE INPUT</h2>
         <p>開始後、A〜Z キーを押している間だけ発音します。A=60、以降はアルファベット順に半音ずつ上がります。</p>
         <p class="keys" aria-hidden="true">A B C D E F G H I J K L M N O P Q R S T U V W X Y Z</p>
+        <p class="fine">確認ボタンは同じ音を3回鳴らします。上書きは2音目だけ明るく、センドは2音目だけディレイ付きになります。</p>
       </section>
 
       <section>

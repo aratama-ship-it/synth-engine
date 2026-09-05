@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 
 export async function importSource(relativeUrl) {
-  const source = await readFile(new URL(relativeUrl, import.meta.url), "utf8");
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+  const sourceUrl = new URL(relativeUrl, import.meta.url);
+  const source = await readFile(sourceUrl, "utf8");
+  const testableSource = source.replaceAll("import.meta.url", JSON.stringify(sourceUrl.href));
+  return import(`data:text/javascript;base64,${Buffer.from(testableSource).toString("base64")}`);
 }
