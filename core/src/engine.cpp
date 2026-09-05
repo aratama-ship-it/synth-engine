@@ -57,7 +57,9 @@ enum ParamId : uint32_t {
     kLfoToCutoff = 49,
     kLfoToPitch = 50,
     kLfoToAmp = 51,
-    kLfoPhase = 52
+    kLfoPhase = 52,
+    kAmpEgCurve = 53,
+    kFilterEgCurve = 54
 };
 
 constexpr uint32_t kLfoHashLayer = 32u;
@@ -124,8 +126,12 @@ void clear_voice(synth::Voice* voice) {
     voice->pinkState[2] = 0.0f;
     voice->velocity = 0.0f;
     voice->envelope = 0.0f;
+    voice->envelopeStageSamples = 0;
+    voice->envelopeReleaseStart = 0.0f;
     voice->filterStage = synth::kEnvOff;
     voice->filterEnvelope = 0.0f;
+    voice->filterEnvelopeStageSamples = 0;
+    voice->filterEnvelopeReleaseStart = 0.0f;
     for (uint32_t channel = 0; channel < 2; ++channel) {
         for (uint32_t stage = 0; stage < 2; ++stage) {
             voice->filter[channel][stage].ic1 = 0.0;
@@ -150,60 +156,9 @@ void update_noise_coefficients(SynthEngine* engine) {
 }
 
 void reset_params(SynthEngine* engine) {
-    engine->params[kOscWavetable] = 0.0f;
-    engine->params[kOscMorph] = 0.0f;
-    engine->params[kOscLevel] = 0.8f;
-    engine->params[kAmpAttack] = 0.005f;
-    engine->params[kAmpDecay] = 0.1f;
-    engine->params[kAmpSustain] = 0.8f;
-    engine->params[kAmpRelease] = 0.2f;
-    engine->params[kMasterGain] = 0.2f;
-    engine->params[kVoiceCount] = 16.0f;
-    engine->params[kOscAUnison] = 1.0f;
-    engine->params[kOscADetune] = 10.0f;
-    engine->params[kOscAWidth] = 0.5f;
-    engine->params[kOscAOctave] = 0.0f;
-    engine->params[kOscASemitone] = 0.0f;
-    engine->params[kOscAFine] = 0.0f;
-    engine->params[kOscAPhaseMode] = 0.0f;
-    engine->params[kOscAPhase] = 0.0f;
-    engine->params[kOscBWavetable] = 0.0f;
-    engine->params[kOscBMorph] = 0.0f;
-    engine->params[kOscBLevel] = 0.0f;
-    engine->params[kOscBUnison] = 1.0f;
-    engine->params[kOscBDetune] = 10.0f;
-    engine->params[kOscBWidth] = 0.5f;
-    engine->params[kOscBOctave] = 0.0f;
-    engine->params[kOscBSemitone] = 0.0f;
-    engine->params[kOscBFine] = 0.0f;
-    engine->params[kOscBPhaseMode] = 0.0f;
-    engine->params[kOscBPhase] = 0.0f;
-    engine->params[kFmBToA] = 0.0f;
-    engine->params[kSubLevel] = 0.0f;
-    engine->params[kSubShape] = 0.0f;
-    engine->params[kSubOctave] = -1.0f;
-    engine->params[kNoiseLevel] = 0.0f;
-    engine->params[kNoiseColor] = 0.0f;
-    engine->params[kNoiseDecay] = 0.05f;
-    engine->params[kFilterEnabled] = 0.0f;
-    engine->params[kFilterMode] = 0.0f;
-    engine->params[kFilterCutoff] = 20000.0f;
-    engine->params[kFilterResonance] = 0.0f;
-    engine->params[kFilterKeyTrack] = 0.0f;
-    engine->params[kFilterEnvAmount] = 0.0f;
-    engine->params[kFilterEgAttack] = 0.005f;
-    engine->params[kFilterEgDecay] = 0.2f;
-    engine->params[kFilterEgSustain] = 1.0f;
-    engine->params[kFilterEgRelease] = 0.2f;
-    engine->params[kFilterVelToEnv] = 0.0f;
-    engine->params[kLfoRate] = 1.0f;
-    engine->params[kLfoShape] = 0.0f;
-    engine->params[kLfoRetrigger] = 0.0f;
-    engine->params[kLfoToCutoff] = 0.0f;
-    engine->params[kLfoToPitch] = 0.0f;
-    engine->params[kLfoToAmp] = 0.0f;
-    engine->params[kLfoPhase] = 0.0f;
-    engine->voiceLimit = 16;
+    for (uint32_t id = 0; id < synth::kParamCount; ++id)
+        engine->params[id] = synth::kParameterInfo[id].defaultValue;
+    engine->voiceLimit = static_cast<uint32_t>(engine->params[kVoiceCount]);
     update_noise_coefficients(engine);
     engine->filterSmoothingCoefficient = 1.0 - synth::fast_exp2(
         -1.0 / (0.005 * engine->sampleRate * synth::kLn2));
@@ -342,10 +297,24 @@ void note_off(SynthEngine* engine, uint32_t noteId) {
         synth::Voice* voice = &engine->voices[i];
         if (voice->active != 0 && voice->noteId == noteId) {
             voice->stage = synth::kEnvRelease;
+            voice->envelopeStageSamples = 0;
+            voice->envelopeReleaseStart = voice->envelope;
             voice->filterStage = synth::kEnvRelease;
+            voice->filterEnvelopeStageSamples = 0;
+            voice->filterEnvelopeReleaseStart = voice->filterEnvelope;
             voice->releaseOrder = ++engine->orderCounter;
         }
     }
+}
+
+float envelope_shape(uint64_t elapsedSamples, double samples, float curve) {
+    const double progress = static_cast<double>(elapsedSamples) / samples;
+    const double remaining = 1.0 - progress;
+    if (curve == 1.0f) return static_cast<float>(remaining);
+    constexpr double end = 0.00390625;  // 2^-8
+    const double exponential = (synth::fast_exp2(-8.0 * progress) - end) / (1.0 - end);
+    return static_cast<float>((1.0 - static_cast<double>(curve)) * exponential +
+                              static_cast<double>(curve) * remaining);
 }
 
 float advance_filter_envelope(SynthEngine* engine, synth::Voice* voice) {
@@ -356,28 +325,58 @@ float advance_filter_envelope(SynthEngine* engine, synth::Voice* voice) {
         if (voice->filterEnvelope >= 1.0f) {
             voice->filterEnvelope = 1.0f;
             voice->filterStage = synth::kEnvDecay;
+            voice->filterEnvelopeStageSamples = 0;
         }
     } else if (voice->filterStage == synth::kEnvDecay) {
         const float sustain = engine->params[kFilterEgSustain];
         const double samples = static_cast<double>(engine->params[kFilterEgDecay]) * engine->sampleRate;
-        if (samples <= 1.0) voice->filterEnvelope = sustain;
-        else {
-            const float coefficient = static_cast<float>(synth::fast_exp2(-8.0 / samples));
-            voice->filterEnvelope = sustain + (voice->filterEnvelope - sustain) * coefficient;
-        }
-        if (synth::absd(static_cast<double>(voice->filterEnvelope - sustain)) < 1.0e-6) {
+        if (engine->params[kFilterEgCurve] == 0.0f) {
+            if (samples <= 1.0) voice->filterEnvelope = sustain;
+            else {
+                const float coefficient = static_cast<float>(synth::fast_exp2(-8.0 / samples));
+                voice->filterEnvelope = sustain + (voice->filterEnvelope - sustain) * coefficient;
+            }
+            if (synth::absd(static_cast<double>(voice->filterEnvelope - sustain)) < 1.0e-6) {
+                voice->filterEnvelope = sustain;
+                voice->filterStage = synth::kEnvSustain;
+            }
+        } else if (samples <= 1.0) {
             voice->filterEnvelope = sustain;
             voice->filterStage = synth::kEnvSustain;
+        } else {
+            ++voice->filterEnvelopeStageSamples;
+            if (static_cast<double>(voice->filterEnvelopeStageSamples) >= samples) {
+                voice->filterEnvelope = sustain;
+                voice->filterStage = synth::kEnvSustain;
+            } else {
+                const float shape = envelope_shape(voice->filterEnvelopeStageSamples, samples,
+                                                   engine->params[kFilterEgCurve]);
+                voice->filterEnvelope = sustain + (1.0f - sustain) * shape;
+            }
         }
     } else if (voice->filterStage == synth::kEnvSustain) {
         voice->filterEnvelope = engine->params[kFilterEgSustain];
     } else if (voice->filterStage == synth::kEnvRelease) {
         const double samples = static_cast<double>(engine->params[kFilterEgRelease]) * engine->sampleRate;
-        if (samples <= 1.0) voice->filterEnvelope = 0.0f;
-        else voice->filterEnvelope *= static_cast<float>(synth::fast_exp2(-16.0 / samples));
-        if (voice->filterEnvelope <= 0.0000158489319f) {
+        if (engine->params[kFilterEgCurve] == 0.0f) {
+            if (samples <= 1.0) voice->filterEnvelope = 0.0f;
+            else voice->filterEnvelope *= static_cast<float>(synth::fast_exp2(-16.0 / samples));
+            if (voice->filterEnvelope <= 0.0000158489319f) {
+                voice->filterEnvelope = 0.0f;
+                voice->filterStage = synth::kEnvOff;
+            }
+        } else if (samples <= 1.0) {
             voice->filterEnvelope = 0.0f;
             voice->filterStage = synth::kEnvOff;
+        } else {
+            ++voice->filterEnvelopeStageSamples;
+            if (static_cast<double>(voice->filterEnvelopeStageSamples) >= samples) {
+                voice->filterEnvelope = 0.0f;
+                voice->filterStage = synth::kEnvOff;
+            } else {
+                voice->filterEnvelope = voice->filterEnvelopeReleaseStart * envelope_shape(
+                    voice->filterEnvelopeStageSamples, samples, engine->params[kFilterEgCurve]);
+            }
         }
     }
     return voice->filterEnvelope;
@@ -391,26 +390,54 @@ float advance_envelope(SynthEngine* engine, synth::Voice* voice) {
         if (voice->envelope >= 1.0f) {
             voice->envelope = 1.0f;
             voice->stage = synth::kEnvDecay;
+            voice->envelopeStageSamples = 0;
         }
     } else if (voice->stage == synth::kEnvDecay) {
         const float sustain = engine->params[kAmpSustain];
         const double samples = static_cast<double>(engine->params[kAmpDecay]) * engine->sampleRate;
-        if (samples <= 1.0) voice->envelope = sustain;
-        else {
-            const float coefficient = static_cast<float>(synth::fast_exp2(-8.0 / samples));
-            voice->envelope = sustain + (voice->envelope - sustain) * coefficient;
-        }
-        if (synth::absd(static_cast<double>(voice->envelope - sustain)) < 1.0e-6) {
+        if (engine->params[kAmpEgCurve] == 0.0f) {
+            if (samples <= 1.0) voice->envelope = sustain;
+            else {
+                const float coefficient = static_cast<float>(synth::fast_exp2(-8.0 / samples));
+                voice->envelope = sustain + (voice->envelope - sustain) * coefficient;
+            }
+            if (synth::absd(static_cast<double>(voice->envelope - sustain)) < 1.0e-6) {
+                voice->envelope = sustain;
+                voice->stage = synth::kEnvSustain;
+            }
+        } else if (samples <= 1.0) {
             voice->envelope = sustain;
             voice->stage = synth::kEnvSustain;
+        } else {
+            ++voice->envelopeStageSamples;
+            if (static_cast<double>(voice->envelopeStageSamples) >= samples) {
+                voice->envelope = sustain;
+                voice->stage = synth::kEnvSustain;
+            } else {
+                const float shape = envelope_shape(voice->envelopeStageSamples, samples,
+                                                   engine->params[kAmpEgCurve]);
+                voice->envelope = sustain + (1.0f - sustain) * shape;
+            }
         }
     } else if (voice->stage == synth::kEnvSustain) {
         voice->envelope = engine->params[kAmpSustain];
     } else if (voice->stage == synth::kEnvRelease) {
         const double samples = static_cast<double>(engine->params[kAmpRelease]) * engine->sampleRate;
-        if (samples <= 1.0) voice->envelope = 0.0f;
-        else voice->envelope *= static_cast<float>(synth::fast_exp2(-16.0 / samples));
-        if (voice->envelope <= 0.0000158489319f) clear_voice(voice);
+        if (engine->params[kAmpEgCurve] == 0.0f) {
+            if (samples <= 1.0) voice->envelope = 0.0f;
+            else voice->envelope *= static_cast<float>(synth::fast_exp2(-16.0 / samples));
+            if (voice->envelope <= 0.0000158489319f) clear_voice(voice);
+        } else if (samples <= 1.0) {
+            clear_voice(voice);
+        } else {
+            ++voice->envelopeStageSamples;
+            if (static_cast<double>(voice->envelopeStageSamples) >= samples) {
+                clear_voice(voice);
+            } else {
+                voice->envelope = voice->envelopeReleaseStart * envelope_shape(
+                    voice->envelopeStageSamples, samples, engine->params[kAmpEgCurve]);
+            }
+        }
     }
     return voice->envelope;
 }
@@ -696,31 +723,25 @@ extern "C" SynthEngine* synth_create(void* memory, size_t bytes, double sampleRa
     return engine;
 }
 
+extern "C" uint32_t synth_param_count(void) {
+    return synth::kParamCount;
+}
+
+extern "C" int synth_param_info(uint32_t id, SynthParamInfo* out) {
+    if (id >= synth::kParamCount || out == 0) return -1;
+    *out = synth::kParameterInfo[id];
+    return 0;
+}
+
 extern "C" int synth_set_param(SynthEngine* engine, uint32_t paramId, float value) {
     if (engine == 0 || paramId >= synth::kParamCount || value != value) return -1;
+    const SynthParamInfo& definition = synth::kParameterInfo[paramId];
+    value = synth::clampf(value, definition.minimum, definition.maximum);
+    if ((definition.flags & SYNTH_PARAM_FLAG_INTEGER) != 0u)
+        value = rounded_integer(value, definition.minimum, definition.maximum);
     bool frequencyChanged = false;
     switch (paramId) {
-        case kOscWavetable: value = synth::clampf(value, 0.0f, 3.0f); break;
-        case kOscBWavetable: value = rounded_integer(value, 0.0f, 3.0f); break;
-        case kOscMorph:
-        case kOscBMorph:
-        case kOscAWidth:
-        case kOscBWidth:
-        case kOscAPhase:
-        case kOscBPhase:
-        case kFmBToA: value = synth::clampf(value, 0.0f, 1.0f); break;
-        case kOscLevel:
-        case kOscBLevel:
-        case kSubLevel:
-        case kNoiseLevel: value = synth::clampf(value, 0.0f, 4.0f); break;
-        case kAmpAttack:
-        case kAmpDecay:
-        case kAmpRelease:
-        case kNoiseDecay: value = synth::clampf(value, 0.0f, 60.0f); break;
-        case kAmpSustain: value = synth::clampf(value, 0.0f, 1.0f); break;
-        case kMasterGain: value = synth::clampf(value, 0.0f, 4.0f); break;
         case kVoiceCount: {
-            value = rounded_integer(value, 1.0f, 16.0f);
             engine->voiceLimit = static_cast<uint32_t>(value);
             for (uint32_t i = engine->voiceLimit; i < synth::kVoiceCapacity; ++i)
                 clear_voice(&engine->voices[i]);
@@ -728,66 +749,18 @@ extern "C" int synth_set_param(SynthEngine* engine, uint32_t paramId, float valu
         }
         case kOscAUnison:
         case kOscBUnison:
-            value = rounded_integer(value, 1.0f, 4.0f);
-            frequencyChanged = true;
-            break;
         case kOscADetune:
         case kOscBDetune:
-            value = synth::clampf(value, 0.0f, 50.0f);
-            frequencyChanged = true;
-            break;
         case kOscAOctave:
         case kOscBOctave:
-            value = rounded_integer(value, -2.0f, 2.0f);
-            frequencyChanged = true;
-            break;
         case kOscASemitone:
         case kOscBSemitone:
-            value = rounded_integer(value, -12.0f, 12.0f);
-            frequencyChanged = true;
-            break;
         case kOscAFine:
         case kOscBFine:
-            value = synth::clampf(value, -100.0f, 100.0f);
-            frequencyChanged = true;
-            break;
-        case kOscAPhaseMode:
-        case kOscBPhaseMode:
-        case kNoiseColor: value = rounded_integer(value, 0.0f, 1.0f); break;
-        case kSubShape: value = rounded_integer(value, 0.0f, 2.0f); break;
         case kSubOctave:
-            value = rounded_integer(value, -2.0f, 0.0f);
             frequencyChanged = true;
             break;
-        case kFilterEnabled:
-        case kLfoRetrigger:
-            value = rounded_integer(value, 0.0f, 1.0f);
-            break;
-        case kFilterMode:
-        case kLfoShape:
-            value = rounded_integer(value, 0.0f, 5.0f);
-            break;
-        case kFilterCutoff: value = synth::clampf(value, 20.0f, 20000.0f); break;
-        case kFilterResonance:
-        case kFilterKeyTrack:
-        case kFilterEgSustain:
-        case kFilterVelToEnv:
-        case kLfoToAmp:
-        case kLfoPhase:
-            value = synth::clampf(value, 0.0f, 1.0f);
-            break;
-        case kFilterEnvAmount:
-        case kLfoToCutoff:
-            value = synth::clampf(value, -8.0f, 8.0f);
-            break;
-        case kFilterEgAttack:
-        case kFilterEgDecay:
-        case kFilterEgRelease:
-            value = synth::clampf(value, 0.0f, 20.0f);
-            break;
-        case kLfoRate: value = synth::clampf(value, 0.01f, 40.0f); break;
-        case kLfoToPitch: value = synth::clampf(value, -1200.0f, 1200.0f); break;
-        default: return -1;
+        default: break;
     }
     engine->params[paramId] = value;
     if (frequencyChanged) update_active_frequencies(engine);
@@ -914,4 +887,4 @@ extern "C" uint32_t synth_get_tail_frames(const SynthEngine* engine) {
     return frames <= 0.0 ? 0u : static_cast<uint32_t>(frames + 0.999999);
 }
 
-extern "C" uint32_t synth_engine_version(void) { return 3; }
+extern "C" uint32_t synth_engine_version(void) { return 4; }

@@ -38,7 +38,7 @@ core/include/synth_engine.h のC ABIです。
 内蔵wavetableのslotは 0 basic（sine→triangle→saw→squareの4フレーム）、
 1 saw、2 square、3 triangleです。slot 0だけがmorphでフレーム間を移動します。
 
-## パラメータ一覧（engine version 3）
+## パラメータ一覧（engine version 4）
 
 | ID | 名前 | 範囲 | 既定 |
 |---:|---|---:|---:|
@@ -95,9 +95,16 @@ core/include/synth_engine.h のC ABIです。
 | 50 | lfoToPitch | -1200..1200 cent | 0 |
 | 51 | lfoToAmp | 0..1 | 0 |
 | 52 | lfoPhase | 0..1 | 0 |
+| 53 | ampEgCurve | 0..1 | 0 |
+| 54 | filterEgCurve | 0..1 | 0 |
 
 filterModeは0=LP12、1=BP12、2=HP12、3=Notch、4=LP24、5=HP24です。
 lfoShapeは0=sine、1=triangle、2=saw上行、3=saw下行、4=square、5=S&Hです。
+ampEgCurveとfilterEgCurveは、各EGのディケイ／リリースに共通して作用します。
+0は従来の指数カーブ、1は直線、その間は正規化した指数カーブと直線の補間です。
+アタックは従来どおり直線です。curve=0は従来の演算経路と終了判定をそのまま使います。
+curve>0では進行度を経過サンプル数から求め、ディケイ／リリースの区間長は指定秒ちょうど
+（端数がある場合は目標へ到達する最初のサンプル）になります。
 
 ## WASM
 
@@ -109,7 +116,7 @@ WASM_CLANG が未設定なら成功扱いでskipを表示します。LLVM clang�
 
     WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang make wasm
 
-## テスト34項目
+## テスト38項目
 
 tests/test_main.cpp はフレームワークを使わず、次を測定します。
 
@@ -131,7 +138,7 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 16. サブの周波数ピーク
 17. ノイズ減衰とseed決定論
 18. 100 Hz〜10 kHzのピンクノイズ傾斜
-19. 全53パラメータのmin/default/maxスイープ
+19. 全55パラメータのmin/default/maxスイープ
 20. 16音・両OSC 4 unison・サブ・ノイズの処理時間
 21. M1a全構成のblock 1/7/64/128/511ビット一致
 22. M0 saw／M1 unisonの変更前ゴールデンWAVとのビット一致
@@ -147,6 +154,10 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 32. フィルタ＋LFO有効時のblock 1/7/64/128/511ビット一致
 33. 全M1b機能有効時のreset後レンダー決定論
 34. LP24・LFO・16音×unison 4の平均／p99処理時間と期限判定
+35. curve=0を明示したM0 saw／M1 unisonの基準WAVとのビット一致、および55パラメータのメタデータ
+36. 直線フィルタEGのディケイ25%／50%／75%時点での実測値
+37. curve 0／0.5／1でエンベロープが0.5へ落ちる時刻の単調増加
+38. curve、decay、releaseの全80組合せでNaN／Inf、振幅上限、リリース後のボイス解放
 
 エイリアス測定は4-term Blackman-Harris窓を使い、基音電力に対する「基音より上、かつ
 期待される第1〜4倍音の各±10 binを除いた電力」の比です。MIDI 108では選択される
@@ -169,6 +180,9 @@ mipの倍音上限が4のため、この4倍音を期待成分とします。
 - LFOはsine／triangle／saw上行／saw下行／square／S&Hの6波形
 - LFOはフリーラン時にエンジン共通、リトリガー時にボイス単位で、cutoff／pitch／ampへ直結
 - filterEnabled=0かつLFO送り先3つが0ならM0/M1aの既存信号経路を通り、変更前WAVとビット一致
+- アンプEGとフィルタEGのディケイ／リリースはcurve 0で従来の指数、curve 1で直線、その間を補間
+- curve 0は既存コードパスを維持し、既定プリセットの出力とビット一致
+- curve>0はリリース開始時のEG値を保持し、指定した区間長の終端で目標値へ到達
 
 ## 未決事項
 
@@ -198,12 +212,15 @@ SPECにないため、以下は公開仕様として確定していません。�
   （現在は各ボイス位相とエンジン共通位相を常時保持し、変更時点で選ばれた側を使う）
 - lfoPhaseを発音中に変更した場合の即時反映規則
   （現在はreset時またはリトリガーnote-on時の開始位置にだけ使う）
+- EGのcurveまたは区間時間を区間の途中で変更した場合の進行度引き継ぎ規則
+  （現在はcurve>0の経過サンプル数を保持し、現在の区間時間に対する進行度として使う。
+  curve 0からcurve>0へ切り替えた場合は、切替時点から進行度0として開始する）
 - S&Hのreset／note-on直後、最初のwrap前に保持する値とglobal識別値
   （現在はcycleIndex 0をhashし、globalはvoiceIndex 0xffffffff、layerは32）
 - S&HのcycleIndexが2^32を超えた後のhash規則
   （現在はhash入力にcycleIndexの下位32 bitを使う）
 - `m1b_filter_sweep` のSPEC未指定値
-  （現在はcutoff 200 Hz、filterEgSustain 0）
+  （現在はcutoff 200 Hz、filterEgSustain 0、filterEgCurve 0.8）
 - `m1b_wobble` のSPEC未指定値
   （現在はcutoff 1000 Hz、resonance 0、sine LFO）
 - テスト23〜30でSPECが指定していない測定用パラメータ

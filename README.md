@@ -31,7 +31,7 @@ JUCE も AGPL か商用ライセンスの二択です。**ライセンスの都�
 
 | | 状態 |
 |---|---|
-| DSPコア | 2オペのウェーブテーブル OSC、ユニゾン最大4声、B→A の位相変調（FM）、サブ、white/pink ノイズ、波形モーフ、TPT/ZDF SVF、フィルタEG、6波形LFO |
+| DSPコア | 2オペのウェーブテーブル OSC、ユニゾン最大4声、B→A の位相変調（FM）、サブ、white/pink ノイズ、波形モーフ、TPT/ZDF SVF、ディケイ／リリースのカーブを選べるアンプ／フィルタEG、6波形LFO |
 | AUv3 プラグイン | `auval` 警告0で通過。パラメータ、状態保存、ファクトリープリセット |
 | スタンドアロン | 起動して A〜Z キーで演奏できる |
 | ブラウザ | AudioWorklet でライブ演奏、OfflineAudioContext でオフライン書き出し |
@@ -55,20 +55,23 @@ JUCE も AGPL か商用ライセンスの二択です。**ライセンスの都�
 | 共振の実挙動 | resonance 1（Q=100）でカットオフ周波数にリンギングし 136 dB/秒 で減衰。**理論値と一致**（持続的な自己発振はしない） |
 | LFO | 6波形とも周期誤差 0%、S&H再レンダーはビット一致。設定 5 Hz で明るさが実測 毎秒 5.0 回変化 |
 | wasm サイズ | 28,452 バイト（gzip 9,198 バイト・import 0） |
-| 自動テスト | 34項目すべて PASS |
+| 自動テスト | 38項目すべて PASS |
 
 ## 動かす
 
 必要なもの: Xcode（clang / swiftc）、GNU make、Node.js。WASM を作るなら `brew install llvm lld`。
 
 ```bash
-make test                 # コアの自動テスト34項目
+make test                 # コアの自動テスト38項目
 make cli                  # オフラインレンダラー
 ./build/render-cli --preset presets/m1_unison_saw.txt --events fixtures/m0_events_chord.txt \
     --out build/out.wav --sr 48000 --block 128 --frames 96000
 
 ./build/render-cli --preset presets/m1b_filter_sweep.txt --events fixtures/m0_events_chord.txt \
     --out build/m1b_filter_sweep.wav --sr 48000 --block 128 --frames 96000
+
+./build/render-cli --preset presets/m1b_sweep_linear.txt --events fixtures/m0_events_chord.txt \
+    --out build/m1b_sweep_linear.wav --sr 48000 --block 128 --frames 96000
 
 make wasm WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang   # build/synth_engine.wasm
 

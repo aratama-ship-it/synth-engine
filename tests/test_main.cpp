@@ -725,7 +725,7 @@ static bool test_pink_noise_slope() {
 }
 
 static bool test_parameter_sweep() {
-    static constexpr float values[53][3] = {
+    static constexpr float values[55][3] = {
         {0.0f, 0.0f, 3.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.8f, 4.0f},
         {0.0f, 0.005f, 60.0f}, {0.0f, 0.1f, 60.0f}, {0.0f, 0.8f, 1.0f},
         {0.0f, 0.2f, 60.0f}, {0.0f, 0.2f, 4.0f}, {1.0f, 16.0f, 16.0f},
@@ -743,12 +743,13 @@ static bool test_parameter_sweep() {
         {0.0f, 0.005f, 20.0f}, {0.0f, 0.2f, 20.0f}, {0.0f, 1.0f, 1.0f},
         {0.0f, 0.2f, 20.0f}, {0.0f, 0.0f, 1.0f}, {0.01f, 1.0f, 40.0f},
         {0.0f, 0.0f, 5.0f}, {0.0f, 0.0f, 1.0f}, {-8.0f, 0.0f, 8.0f},
-        {-1200.0f, 0.0f, 1200.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}
+        {-1200.0f, 0.0f, 1200.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}
     };
     uint64_t nonFinite = 0;
     double peak = 0.0;
     uint32_t renders = 0;
-    for (uint32_t id = 0; id < 53; ++id) {
+    for (uint32_t id = 0; id < 55; ++id) {
         for (uint32_t choice = 0; choice < 3; ++choice) {
             std::vector<Parameters> params = {
                 {3, 0.0f}, {4, 0.0f}, {5, 1.0f}, {6, 0.01f}, {7, 0.2f},
@@ -768,7 +769,7 @@ static bool test_parameter_sweep() {
             ++renders;
         }
     }
-    const bool ok = renders == 159 && nonFinite == 0 && peak <= 8.0 && synth_engine_version() == 3;
+    const bool ok = renders == 165 && nonFinite == 0 && peak <= 8.0 && synth_engine_version() == 4;
     std::printf("%s 19 parameter sweep: renders=%u nan_inf=%llu peak=%.9f limit=8.000000 version=%u\n",
                 ok ? "PASS" : "FAIL", renders,
                 static_cast<unsigned long long>(nonFinite), peak, synth_engine_version());
@@ -909,11 +910,13 @@ static StereoRender load_float_stereo_wav(const char* path) {
 }
 
 static bool golden_case(const char* presetPath, const char* eventPath,
-                        const char* goldenPath, size_t* mismatches) {
+                        const char* goldenPath, size_t* mismatches,
+                        bool explicitCurveZero = false) {
     std::vector<Parameters> parameters;
     std::vector<TimedEvent> events;
     if (!load_parameter_file(presetPath, parameters) ||
         !load_timed_event_file(eventPath, events)) return false;
+    if (explicitCurveZero) parameters.insert(parameters.end(), {{53, 0.0f}, {54, 0.0f}});
     const StereoRender rendered = render_stereo(48000, 128, 96000, events, parameters, 0);
     const StereoRender golden = load_float_stereo_wav(goldenPath);
     *mismatches += bit_mismatches(rendered.left, golden.left);
@@ -1354,6 +1357,203 @@ static bool test_m1b_performance() {
     return ok;
 }
 
+static bool test_curve_zero_golden_and_metadata() {
+    const uint32_t count = synth_param_count();
+    std::vector<SynthParamInfo> parameters(count);
+    bool metadataValid = count == 55;
+    for (uint32_t id = 0; id < count; ++id) {
+        SynthParamInfo& parameter = parameters[id];
+        metadataValid = metadataValid && synth_param_info(id, &parameter) == 0;
+        metadataValid = metadataValid && parameter.id == id && parameter.identifier != nullptr &&
+                        parameter.identifier[0] != '\0' && parameter.displayName != nullptr &&
+                        parameter.displayName[0] != '\0';
+        metadataValid = metadataValid && parameter.minimum <= parameter.defaultValue &&
+                        parameter.defaultValue <= parameter.maximum;
+        if (parameter.identifier != nullptr) {
+            for (const unsigned char* character =
+                     reinterpret_cast<const unsigned char*>(parameter.identifier);
+                 *character != '\0'; ++character) {
+                metadataValid = metadataValid && *character >= 0x21u && *character <= 0x7eu;
+            }
+        }
+        for (uint32_t previous = 0; previous < id; ++previous) {
+            if (parameters[previous].identifier != nullptr && parameter.identifier != nullptr)
+                metadataValid = metadataValid &&
+                    std::strcmp(parameters[previous].identifier, parameter.identifier) != 0;
+        }
+    }
+
+    SynthParamInfo ignored{};
+    const bool boundsValid = synth_param_info(count, &ignored) < 0 &&
+                             synth_param_info(0, nullptr) < 0;
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 128);
+    bool defaultsMatch = engine != nullptr;
+    if (engine != nullptr) {
+        for (uint32_t id = 0; id < count; ++id)
+            defaultsMatch = defaultsMatch && engine->params[id] == parameters[id].defaultValue;
+    }
+
+    size_t sawMismatch = 0;
+    size_t unisonMismatch = 0;
+    const bool sawLoaded = golden_case("presets/m0_saw.txt", "fixtures/m0_events_chord.txt",
+        "/tmp/g2_m0.wav", &sawMismatch, true);
+    const bool unisonLoaded = golden_case("presets/m1_unison_saw.txt", "fixtures/listen_chord.txt",
+        "/tmp/g2_m1.wav", &unisonMismatch, true);
+    const bool ok = metadataValid && boundsValid && defaultsMatch && sawLoaded && unisonLoaded &&
+                    sawMismatch == 0 && unisonMismatch == 0;
+    std::printf("%s 35 curve 0 golden: m0_mismatches=%zu m1_mismatches=%zu params=%u metadata=%s\n",
+                ok ? "PASS" : "FAIL", sawMismatch, unisonMismatch, count,
+                metadataValid && defaultsMatch ? "valid" : "invalid");
+    return ok;
+}
+
+static bool set_envelope_test_params(SynthEngine* engine, float curve,
+                                     float decay, float release) {
+    const Parameters parameters[] = {
+        {0, 1.0f}, {1, 0.0f}, {2, 0.8f}, {3, 0.0f}, {4, decay}, {5, 0.0f},
+        {6, release}, {7, 0.2f}, {8, 1.0f}, {35, 1.0f}, {36, 4.0f},
+        {37, 200.0f}, {38, 0.6f}, {40, 4.0f}, {41, 0.0f}, {42, decay},
+        {43, 0.0f}, {44, release}, {53, curve}, {54, curve}
+    };
+    for (const Parameters& parameter : parameters) {
+        if (synth_set_param(engine, parameter.id, parameter.value) != 0) return false;
+    }
+    return true;
+}
+
+static bool process_empty_frames(SynthEngine* engine, uint32_t frames) {
+    float left[128]{};
+    float right[128]{};
+    uint32_t position = 0;
+    while (position < frames) {
+        const uint32_t count = std::min<uint32_t>(128, frames - position);
+        if (synth_process(engine, nullptr, 0, left, right, count) != 0) return false;
+        position += count;
+    }
+    return true;
+}
+
+static bool test_linear_envelope_uniformity() {
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 128);
+    if (engine == nullptr || !set_envelope_test_params(engine, 1.0f, 1.0f, 1.0f)) return false;
+    synth_reset(engine, SYNTH_RESET_VOICES, 173u);
+    const SynthEvent note{0, SYNTH_EV_NOTE_ON, 501, 48.0f, 1.0f};
+    float left = 0.0f;
+    float right = 0.0f;
+    if (synth_process(engine, &note, 1, &left, &right, 1) != 0) return false;
+    float measured[3]{};
+    for (uint32_t point = 0; point < 3; ++point) {
+        if (!process_empty_frames(engine, 12000)) return false;
+        measured[point] = engine->voices[0].filterEnvelope;
+    }
+    const float expected[3] = {0.75f, 0.50f, 0.25f};
+    bool ok = true;
+    for (uint32_t point = 0; point < 3; ++point)
+        ok = ok && std::fabs(measured[point] - expected[point]) <= 0.03f;
+    std::printf("%s 36 linear curve: eg25=%.9f eg50=%.9f eg75=%.9f tolerance=0.030000000\n",
+                ok ? "PASS" : "FAIL", measured[0], measured[1], measured[2]);
+    return ok;
+}
+
+static double measure_filter_half_time(float curve) {
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 1);
+    if (engine == nullptr || !set_envelope_test_params(engine, curve, 1.0f, 1.0f)) return -1.0;
+    synth_reset(engine, SYNTH_RESET_VOICES, 179u);
+    const SynthEvent note{0, SYNTH_EV_NOTE_ON, 502, 48.0f, 1.0f};
+    float left = 0.0f;
+    float right = 0.0f;
+    if (synth_process(engine, &note, 1, &left, &right, 1) != 0) return -1.0;
+    for (uint32_t sample = 1; sample <= 48000; ++sample) {
+        if (synth_process(engine, nullptr, 0, &left, &right, 1) != 0) return -1.0;
+        if (engine->voices[0].filterEnvelope <= 0.5f)
+            return static_cast<double>(sample) / 48000.0;
+    }
+    return -1.0;
+}
+
+static bool test_envelope_curve_monotonicity() {
+    const double half0 = measure_filter_half_time(0.0f);
+    const double half05 = measure_filter_half_time(0.5f);
+    const double half1 = measure_filter_half_time(1.0f);
+    const bool ok = half0 > 0.0 && half0 < half05 && half05 < half1;
+    std::printf("%s 37 curve half times: curve0=%.9fs curve0.5=%.9fs curve1=%.9fs\n",
+                ok ? "PASS" : "FAIL", half0, half05, half1);
+    return ok;
+}
+
+static bool test_envelope_curve_health() {
+    static constexpr float curves[] = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
+    static constexpr float times[] = {0.0f, 0.01f, 1.0f, 20.0f};
+    constexpr uint32_t sampleRate = 48000;
+    constexpr uint32_t block = 128;
+    constexpr uint32_t renderFrames = 14400;
+    constexpr uint32_t noteOffFrame = 4800;
+    uint32_t cases = 0;
+    uint32_t unreleased = 0;
+    uint64_t nonFinite = 0;
+    double peak = 0.0;
+    for (float curve : curves) {
+        for (float decay : times) {
+            for (float release : times) {
+                std::vector<unsigned char> state(synth_state_size());
+                SynthEngine* engine = synth_create(state.data(), state.size(), sampleRate, block);
+                if (engine == nullptr || !set_envelope_test_params(engine, curve, decay, release))
+                    return false;
+                synth_reset(engine, SYNTH_RESET_VOICES, 181u + cases);
+                float left[block]{};
+                float right[block]{};
+                uint32_t position = 0;
+                while (position < renderFrames) {
+                    const uint32_t count = std::min<uint32_t>(block, renderFrames - position);
+                    SynthEvent event{};
+                    const SynthEvent* events = nullptr;
+                    uint32_t eventCount = 0;
+                    if (position == 0) {
+                        event = SynthEvent{0, SYNTH_EV_NOTE_ON, 503, 48.0f, 1.0f};
+                        events = &event;
+                        eventCount = 1;
+                    } else if (noteOffFrame >= position && noteOffFrame < position + count) {
+                        event = SynthEvent{noteOffFrame - position, SYNTH_EV_NOTE_OFF, 503, 0.0f, 0.0f};
+                        events = &event;
+                        eventCount = 1;
+                    }
+                    if (synth_process(engine, events, eventCount, left, right, count) != 0)
+                        return false;
+                    for (uint32_t i = 0; i < count; ++i) {
+                        if (!std::isfinite(left[i]) || !std::isfinite(right[i])) ++nonFinite;
+                        peak = std::max(peak, std::fabs(static_cast<double>(left[i])));
+                        peak = std::max(peak, std::fabs(static_cast<double>(right[i])));
+                    }
+                    position += count;
+                }
+                const uint32_t releaseFrames = static_cast<uint32_t>(
+                    static_cast<double>(release) * sampleRate + 0.999999) + block;
+                uint32_t tail = 0;
+                while (engine->voices[0].active != 0 && tail < releaseFrames) {
+                    const uint32_t count = std::min<uint32_t>(block, releaseFrames - tail);
+                    if (synth_process(engine, nullptr, 0, left, right, count) != 0) return false;
+                    for (uint32_t i = 0; i < count; ++i) {
+                        if (!std::isfinite(left[i]) || !std::isfinite(right[i])) ++nonFinite;
+                        peak = std::max(peak, std::fabs(static_cast<double>(left[i])));
+                        peak = std::max(peak, std::fabs(static_cast<double>(right[i])));
+                    }
+                    tail += count;
+                }
+                if (engine->voices[0].active != 0) ++unreleased;
+                ++cases;
+            }
+        }
+    }
+    const bool ok = cases == 80 && nonFinite == 0 && peak <= 8.0 && unreleased == 0;
+    std::printf("%s 38 curve health: cases=%u nan_inf=%llu peak=%.9f unreleased=%u\n",
+                ok ? "PASS" : "FAIL", cases,
+                static_cast<unsigned long long>(nonFinite), peak, unreleased);
+    return ok;
+}
+
 int main() {
     uint32_t passed = 0;
     passed += test_block_invariance();
@@ -1390,6 +1590,10 @@ int main() {
     passed += test_m1b_block_invariance();
     passed += test_m1b_reset_determinism();
     passed += test_m1b_performance();
-    std::printf("SUMMARY passed=%u failed=%u total=34\n", passed, 34u - passed);
-    return passed == 34 ? 0 : 1;
+    passed += test_curve_zero_golden_and_metadata();
+    passed += test_linear_envelope_uniformity();
+    passed += test_envelope_curve_monotonicity();
+    passed += test_envelope_curve_health();
+    std::printf("SUMMARY passed=%u failed=%u total=38\n", passed, 38u - passed);
+    return passed == 38 ? 0 : 1;
 }

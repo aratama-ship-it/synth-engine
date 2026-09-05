@@ -2,12 +2,12 @@
 #define SYNTH_ENGINE_INTERNAL_HPP
 
 #include "../include/synth_engine.h"
+#include "params.hpp"
 #include "wavetable.hpp"
 
 namespace synth {
 
 constexpr uint32_t kVoiceCapacity = 16;
-constexpr uint32_t kParamCount = 53;
 constexpr uint32_t kMaxUnison = 4;
 
 enum EnvelopeStage : uint32_t {
@@ -42,8 +42,12 @@ struct Voice {
     float pinkState[3];
     float velocity;
     float envelope;
+    uint64_t envelopeStageSamples;
+    float envelopeReleaseStart;
     uint32_t filterStage;
     float filterEnvelope;
+    uint64_t filterEnvelopeStageSamples;
+    float filterEnvelopeReleaseStart;
     SvfState filter[2][2];
     double lfoPhase;
     uint64_t lfoCycleIndex;

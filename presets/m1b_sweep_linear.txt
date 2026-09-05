@@ -1,4 +1,4 @@
-# M1b classic saw low-pass filter sweep
+# M1b classic saw low-pass filter sweep, linear filter EG
 0=1
 1=0
 2=0.8
@@ -17,4 +17,4 @@
 42=0.8
 43=0
 44=0.2
-54=0.8
+54=1

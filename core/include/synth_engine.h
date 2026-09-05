@@ -30,8 +30,32 @@ enum SynthResetKind {
     SYNTH_RESET_ALL = 1
 };
 
+enum SynthParamFlags {
+    SYNTH_PARAM_FLAG_NONE = 0,
+    SYNTH_PARAM_FLAG_INTEGER = 1 << 0,
+    SYNTH_PARAM_FLAG_SECONDS = 1 << 1,
+    SYNTH_PARAM_FLAG_HERTZ = 1 << 2,
+    SYNTH_PARAM_FLAG_CENTS = 1 << 3,
+    SYNTH_PARAM_FLAG_SEMITONES = 1 << 4,
+    SYNTH_PARAM_FLAG_OCTAVES = 1 << 5,
+    SYNTH_PARAM_FLAG_GAIN = 1 << 6,
+    SYNTH_PARAM_FLAG_BIPOLAR = 1 << 7
+};
+
+typedef struct {
+    uint32_t id;
+    const char* identifier;
+    const char* displayName;
+    float minimum;
+    float maximum;
+    float defaultValue;
+    uint32_t flags;
+} SynthParamInfo;
+
 size_t synth_state_size(void);
 SynthEngine* synth_create(void* memory, size_t bytes, double sampleRate, uint32_t maxBlock);
+uint32_t synth_param_count(void);
+int synth_param_info(uint32_t id, SynthParamInfo* out);
 int synth_set_param(SynthEngine* engine, uint32_t paramId, float value);
 int synth_load_wavetable(SynthEngine* engine, uint32_t slot, const float* frames, uint32_t frameCount);
 void synth_reset(SynthEngine* engine, uint32_t kind, uint64_t seed);
