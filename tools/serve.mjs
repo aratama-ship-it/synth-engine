@@ -18,7 +18,8 @@ const TYPES = {
 
 http.createServer((req, res) => {
   let rel = decodeURIComponent(req.url.split("?")[0]);
-  if (rel === "/") { res.writeHead(302, { Location: "/design/listen/index.html" }); res.end(); return; }
+  // `/` はブラウザ版デモへ。試聴ページ（design/listen/）は手元だけの判断用で公開物には含まれない。
+  if (rel === "/") { res.writeHead(302, { Location: "/shells/web/demo.html" }); res.end(); return; }
   const target = path.normalize(path.join(ROOT, rel));
   if (!target.startsWith(ROOT)) { res.writeHead(403); res.end("403"); return; }
   fs.stat(target, (err, stat) => {

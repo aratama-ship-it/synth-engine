@@ -1,114 +1,114 @@
-# Synth Engine M1a
+# synth-engine
 
-SPEC_M0a.md の縦切りスパイクに、SPEC_M1a.md のWT OSC A/B、ユニゾン、B→A位相変調、
-サブ、ノイズを追加した実装です。第三者コードや外部ライブラリを含まず、DSPコアは
-C++標準ライブラリ、動的確保、例外、RTTI、ロックを使いません。公開面は
-core/include/synth_engine.h のC ABIです。
-
-## ビルドとテスト
-
-一般形:
-
-    make core
-    make cli
-    make test
-    make core-freestanding-check
-
-このMac（macOS、Apple Clang）で確認した実行例:
-
-    cd "/Users/arata/Library/Mobile Documents/com~apple~CloudDocs/claude code files/apps/music-plugins/synth-engine"
-    make test
-    make cli
-    build/render-cli --preset presets/m0_saw.txt --events fixtures/m0_events_chord.txt \
-      --out build/out.wav --sr 48000 --block 128 --frames 96000
-    make core-freestanding-check
-
-生成物はすべて build/ 配下に置かれます。CLIは32-bit float、ステレオのWAVを出力し、
-標準出力に peak_dbfs、rms_dbfs、nan_count を表示します。
-
-## 入力形式
-
-プリセットは1行に paramId=value、イベントは1行に frame kind id a b を書きます。
-空行と # 以降は無視します。イベントの frame は絶対フレームで、CLIがブロック内
-オフセットへ変換します。
-
-内蔵wavetableのslotは 0 basic（sine→triangle→saw→squareの4フレーム）、
-1 saw、2 square、3 triangleです。slot 0だけがmorphでフレーム間を移動します。
-
-## WASM
-
-WASM_CLANG が未設定なら成功扱いでskipを表示します。LLVM clangのパスを指定する一般形:
-
-    WASM_CLANG=/path/to/clang make wasm
-
-このMacでHomebrew LLVMを使う場合の例:
-
-    WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang make wasm
-
-## テスト21項目
-
-tests/test_main.cpp はフレームワークを使わず、次を測定します。
-
-1. block 1/7/64/128/511のビット一致
-2. 同一offsetのイベント順序と1,000イベントfixtureの処理件数
-3. NOTE_ON前後の最初の非ゼロフレーム
-4. 96k/44.1k/48kと全blockサイズでのNaN、Inf、denormal件数
-5. 20音入力時の16ボイス上限とsteal順
-6. 同一seed reset後のビット一致とhash決定論
-7. fast_sin、fast_cos、fast_exp2 の最大誤差
-8. MIDI 108 sawの2048点自作FFTによる簡易エイリアス比
-9. ユニゾンのseed決定論
-10. 1声と4声のRMS差
-11. 2声・±50 centのピーク間隔
-12. widthによる左右相関とmono時のビット一致
-13. FM無効時のビット一致
-14. FM有効時のスペクトル重心
-15. MIDI 72 FMの折返し比
-16. サブの周波数ピーク
-17. ノイズ減衰とseed決定論
-18. 100 Hz〜10 kHzのピンクノイズ傾斜
-19. 全35パラメータのmin/default/maxスイープ
-20. 16音・両OSC 4 unison・サブ・ノイズの処理時間
-21. M1a全構成のblock 1/7/64/128/511ビット一致
-
-エイリアス測定は4-term Blackman-Harris窓を使い、基音電力に対する「基音より上、かつ
-期待される第1〜4倍音の各±10 binを除いた電力」の比です。MIDI 108では選択される
-mipの倍音上限が4のため、この4倍音を期待成分とします。
-
-## M1aで確定した事項
-
-- wavetableは4 slot、1 slotあたり最大4 frame
-- slot 0のmorphは隣接2フレームの線形補間
-- ユニゾンは等電力パン、合計ゲインは1/sqrt(U)
-- B→A位相変調は全開で2 cycle
-- ピンクノイズは20 Hz / 200 Hz / 2 kHzの1極LPFを1.0 / 0.32 / 0.10で加算
-- パラメータ範囲外はclamp、NaNと未知IDはエラー
-
-## 未決事項
-
-SPECにないため、以下は公開仕様として確定していません。括弧内は現在の挙動です。
-
-- SYNTH_EV_MACRO の割当先（イベント順序には参加するがM0aでは音声変化なし）
-- 未知のイベントkindの扱い（音声変化なし）
-- OSC Aが1 unisonかつM1a音源がすべて無効なときのphaseMode=0の扱い
-  （M0aビット互換を優先して0.25 cycle開始。ユニゾン使用時は仕様どおりhash開始）
-- 発音中にunison数、phaseMode、固定phaseを変更した場合の位相再初期化規則
-  （現在は再初期化せず、ノートオン時に用意した各位相を継続）
-- 発音中にnoiseLevelを0から上げた場合のpink LPF履歴
-  （現在はnoiseLevel=0の間はLPFを更新しない）
-- ノイズのsampleIndexが2^32 sampleを越えた後のhash規則
-  （現在はhash入力の下位32 bitを使う）
-- mip段の境界補間（周波数から1段を選ぶhard switch）
-- ADSR、level、gain、wavetable slotの初期値（コード内のM0a初期値）
-- SYNTH_RESET_VOICES と SYNTH_RESET_ALL のパラメータ保持範囲
-  （VOICESはパラメータ保持、ALLはM0a初期値へ戻す）
-- カスタムwavetable読込時の振幅正規化（入力のFourier再構成振幅を保持）
-- 簡易エイリアス測定の窓、除外bin幅、集計帯域（上記のテスト定義）
-
-## native と wasm の比較（Claude追記 2026-09-04）
+ウェーブテーブル・シンセサイザーを、**第三者ライブラリを1行も使わずに**ゼロから作っています。
+ひとつの C++ コアを、**AUv3 プラグイン（Logic Pro などで使う）／macOS スタンドアロン／ブラウザ（WebAssembly + AudioWorklet）**の
+3つの殻から鳴らします。
 
 ```
-make wasm WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang
-node tools/wasm-check/compare.mjs build/synth_engine.wasm presets/m0_saw.txt fixtures/m0_events_chord.txt build/out.wav 48000 128 96000
+                    ┌──────────────────────────────────────────┐
+   Logic Pro   ───▶ │ AUv3 (AudioToolbox / AUAudioUnit)        │
+   スタンドアロン ─▶ │ AVAudioEngine で自分の AUv3 をホスト       │──┐
+   ブラウザ    ───▶ │ wasm32 + AudioWorkletProcessor           │  │
+                    └──────────────────────────────────────────┘  │
+                                                                   ▼
+                    ┌──────────────────────────────────────────────────────┐
+                    │ core/  C++20 DSPコア                                  │
+                    │  ・標準ライブラリにも依存しない（stddef.h / stdint.h のみ） │
+                    │  ・動的確保なし・例外なし・ブロック処理・C ABI           │
+                    │  ・同じ入力から必ず同じサンプルが出る（決定論的）          │
+                    └──────────────────────────────────────────────────────┘
 ```
-実測: 最大差 −133.6 dBFS、RMS差 −162 dBFS（M0 基準3を満たす）。注意: `synth_reset(ALL)` はパラメータを初期値へ戻すので、プリセット設定後は `reset(VOICES)` を使う。
+
+## なぜ全部自分で書いているか
+
+音の部品を配っている優れた C++ ライブラリはありますが、多くは GPL 系で、使うと配布側に義務が生じます。
+JUCE も AGPL か商用ライセンスの二択です。**ライセンスの都合で後から動けなくなるのを避けたい**ので、
+リンクして配布物に入るコードは全部自分で書くことにしました。
+公知のアルゴリズム（SVF、ADSR、加算合成によるミップマップなど）は自分で実装しています。
+コンパイラやビルドツールは配布物に入らないので、そこは普通に使います。
+
+## いまできること
+
+| | 状態 |
+|---|---|
+| DSPコア（オシレーター部） | 2オペのウェーブテーブル OSC、ユニゾン最大4声、B→A の位相変調（FM）、サブ、white/pink ノイズ、波形モーフ |
+| AUv3 プラグイン | `auval` 警告0で通過。パラメータ、状態保存、ファクトリープリセット |
+| スタンドアロン | 起動して A〜Z キーで演奏できる |
+| ブラウザ | AudioWorklet でライブ演奏、OfflineAudioContext でオフライン書き出し |
+| フィルタ・LFO・モジュレーション | **まだありません**（次の段階） |
+
+## 実測値（Apple M4 Pro / macOS 26.5.2）
+
+3つの殻が本当に同じ音を出しているかを、毎回数値で確認しています。
+
+| 測定 | 結果 |
+|---|---|
+| **AU と CLI の出力** | **ビット一致**（ベロシティが MIDI の7bitで表せる値のとき） |
+| **wasm と native の差** | 最大 −133.6 dBFS ／ RMS −162.2 dBFS |
+| ブロックサイズ不変性 | block 1／7／64／128／511 でビット一致 |
+| サンプルレート | 44.1／48／96 kHz すべてで NaN・Inf ゼロ |
+| 処理時間 | 16音 × ユニゾン4 で平均 192 µs・p99 224 µs（48 kHz / 128 frames の期限 2667 µs に対して 8.4%） |
+| エイリアス | ノコギリ波 C8 で −96.2 dB、FM 全開で −94.3 dB |
+| wasm サイズ | 18,962 バイト（gzip 4,010 バイト・import 0） |
+| 自動テスト | 21項目すべて PASS |
+
+## 動かす
+
+必要なもの: Xcode（clang / swiftc）、GNU make、Node.js。WASM を作るなら `brew install llvm lld`。
+
+```bash
+make test                 # コアの自動テスト21項目
+make cli                  # オフラインレンダラー
+./build/render-cli --preset presets/m1_unison_saw.txt --events fixtures/m0_events_chord.txt \
+    --out build/out.wav --sr 48000 --block 128 --frames 96000
+
+make wasm WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang   # build/synth_engine.wasm
+
+bash shells/apple/build.sh    # AUv3 + スタンドアロン（署名IDは自動検出）
+auval -v aumu Sken Arat       # AU の検証
+
+node tools/serve.mjs          # ブラウザ版 → http://127.0.0.1:8963/shells/web/demo.html
+```
+
+詳しくは [docs_BUILD.md](docs_BUILD.md)（コアの入出力形式・テスト項目・未決事項）、
+[shells/apple/README_apple.md](shells/apple/README_apple.md)（AUv3 の作り方と落とし穴）、
+[shells/web/README_web.md](shells/web/README_web.md)（AudioWorklet 側）。
+
+## 構成
+
+```
+core/         DSPコア（C ABI。ここだけで音が決まる）
+shells/apple/ AUv3 拡張 + スタンドアロン（Apple のフレームワークのみ）
+shells/web/   AudioWorkletProcessor + デモページ（自前ローダのみ）
+tools/        オフラインレンダラー、AU と CLI の突き合わせ、確認用サーバー
+tests/        自作の検証ハーネス（テストフレームワーク不使用）
+presets/      プリセット（1行1パラメータのテキスト）
+fixtures/     イベント列（絶対フレーム位置つき）
+```
+
+## この先
+
+1. フィルタ（SVF）＋フィルタ用エンベロープ＋LFO ← 次
+2. モジュレーションマトリクスとマクロ
+3. 別プロジェクト [random-scale-keys](https://github.com/aratama-ship-it/random-scale-keys) の音源をこのシンセに差し替える
+
+## 開発中に踏んだ落とし穴（macOS で AUv3 を自作する人へ）
+
+- **App Extension は `-bundle` でリンクしてはいけない。** `-e _NSExtensionMain -fapplication-extension` の実行形式にしないと
+  entitlements が署名に乗らず、`pluginkit` に登録されない。
+- **`fullState` は `[super fullState]` を土台にする。** 自前の辞書だけ返すと `auval` が
+  「Class Data does not have required field: componentType」で落ちる。
+- **iCloud Drive 上のファイルは扱えない。** 同期属性のせいで `codesign` が
+  「resource fork, Finder information, or similar detritus not allowed」で失敗し、
+  さらに **iCloud 上に置いた実行ファイルからは AUv3 を読み込めない**（`NSOSStatusErrorDomain -1`。同じバイナリを別の場所に置くと成功）。
+  そのためビルド生成物は `~/build/` に出しています。
+- **AudioWorkletGlobalScope に `performance` が無い環境がある。** `Date.now()` へのフォールバックが要る。
+- **AU と CLI の出力が一致しないと思ったら MIDI の7bitだった。** ベロシティ 0.8 は 102/127 = 0.80315 になり、
+  信号比 −48 dB の差として現れます。実装の誤りではありません。
+
+## ライセンス
+
+**未定です。** 現時点では LICENSE ファイルを置いていないため、法的にはすべての権利が留保された状態です
+（読むこと・学ぶことはご自由に。再利用や再配布の可否は決まり次第ここに書きます）。
+
+第三者のコードは含んでいません。ビルドに使う Apple のフレームワークと LLVM は、配布物にリンクされる形では含まれていません。

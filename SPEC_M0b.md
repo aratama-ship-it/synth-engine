@@ -7,7 +7,7 @@
 
 - AU タイプ `aumu`、サブタイプ `Sken`、製造者 `Arat`。製品名 `SynthEngine`（仮）、製造者名 `ARATA URAWA`
 - Bundle ID: アプリ `com.pygmix.synthengine`、拡張 `com.pygmix.synthengine.au`
-- 署名: このMacの証明書 `Apple Development: YOUR NAME (YOURTEAMID)`（Team ID YOURTEAMID）。アプリと拡張は同じ Team ID
+- 署名: キーチェーンの `Apple Development` 証明書を `build.sh` が自動検出する（`SIGN_IDENTITY` で上書き可）。アプリと拡張は同じ Team ID
 - バージョン: `0.1.0`（`CFBundleShortVersionString`）。画面左上に `v0.1.0` を表示（全開発共通ルール）
 
 ## 作るもの

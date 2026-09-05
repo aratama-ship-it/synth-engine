@@ -7,13 +7,13 @@ AppKitスタンドアロンです。第三者ライブラリ・第三者コー�
 
 - Xcode 26.6 / macOS SDK 26.5（2026-09-04に確認）
 - `/usr/bin/auval` と `/usr/bin/pluginkit`
-- コード署名ID `Apple Development: YOUR NAME (YOURTEAMID)`
-- Team ID `YOURTEAMID`
+- コード署名: キーチェーンの `Apple Development` 証明書（`build.sh` が自動検出。`SIGN_IDENTITY` で明示指定も可。
+  証明書が無ければ ad-hoc 署名にフォールバックするが、その場合 Logic など別ホストでの読込は保証されない）
 
 ## ビルド
 
 ```bash
-cd "/Users/arata/Library/Mobile Documents/com~apple~CloudDocs/claude code files/apps/music-plugins/synth-engine"
+cd "~/Library/Mobile Documents/com~apple~CloudDocs/claude code files/apps/music-plugins/synth-engine"
 bash shells/apple/build.sh
 ```
 
@@ -27,7 +27,7 @@ bash shells/apple/build.sh
 `0 valid identities found` でした。次を本人が行う必要があります。
 
 1. 「キーチェーンアクセス」を開く。
-2. `Apple Development: YOUR NAME (YOURTEAMID)` の証明書と、展開時に表示される秘密鍵が
+2. `Apple Development` の証明書と、展開時に表示される秘密鍵が
    ログインキーチェーン内にあることを確認する。無い場合はXcodeの Settings > Accounts >
    Manage Certificates でApple Development証明書を作成するか、秘密鍵を含む `.p12` を読み込む。
 3. キーチェーンがロック中なら解除する。`codesign` 実行時に秘密鍵利用の確認が出た場合は、
@@ -105,16 +105,16 @@ property list検査、DSPコア、AUv3バイナリ、Swiftスタンドアロン�
 
 ```text
 [1/7] Validate source property lists
-/Users/arata/Library/Mobile Documents/com~apple~CloudDocs/claude code files/apps/music-plugins/synth-engine/shells/apple/Info-AU.plist: OK
-/Users/arata/Library/Mobile Documents/com~apple~CloudDocs/claude code files/apps/music-plugins/synth-engine/shells/apple/Info-App.plist: OK
-/Users/arata/Library/Mobile Documents/com~apple~CloudDocs/claude code files/apps/music-plugins/synth-engine/shells/apple/SynthEngineAU.entitlements: OK
-/Users/arata/Library/Mobile Documents/com~apple~CloudDocs/claude code files/apps/music-plugins/synth-engine/shells/apple/SynthEngineApp.entitlements: OK
+~/Library/Mobile Documents/com~apple~CloudDocs/claude code files/apps/music-plugins/synth-engine/shells/apple/Info-AU.plist: OK
+~/Library/Mobile Documents/com~apple~CloudDocs/claude code files/apps/music-plugins/synth-engine/shells/apple/Info-App.plist: OK
+~/Library/Mobile Documents/com~apple~CloudDocs/claude code files/apps/music-plugins/synth-engine/shells/apple/SynthEngineAU.entitlements: OK
+~/Library/Mobile Documents/com~apple~CloudDocs/claude code files/apps/music-plugins/synth-engine/shells/apple/SynthEngineApp.entitlements: OK
 [2/7] Compile DSP core for AUv3
 [3/7] Build AUv3 extension
 [4/7] Build Swift standalone app
 [5/7] Locate signing identity
 error: signing identity is not available to this process:
-  Apple Development: YOUR NAME (YOURTEAMID)
+  Apple Development: <あなたの証明書>
 Open Keychain Access, import/unlock the certificate and private key, then rerun:
   bash shells/apple/build.sh
 ```

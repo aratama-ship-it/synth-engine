@@ -1,3 +1,4 @@
 build/
 *.wav
 .DS_Store
+design/

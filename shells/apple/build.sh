@@ -9,7 +9,22 @@ BUILD_DIR="${SYNTH_BUILD_DIR:-$HOME/build/synth-engine/apple}"
 OBJECT_DIR="$BUILD_DIR/objects"
 APP_BUNDLE="$BUILD_DIR/SynthEngineApp.app"
 APPEX_BUNDLE="$APP_BUNDLE/Contents/PlugIns/SynthEngineAU.appex"
-IDENTITY="${SIGN_IDENTITY:-Apple Development: YOUR NAME (YOURTEAMID)}"
+# 署名IDは環境ごとに違うので固定値を持たない。
+#   1) SIGN_IDENTITY が指定されていればそれを使う
+#   2) 無ければキーチェーンの "Apple Development" 証明書を自動で1つ選ぶ
+#   3) それも無ければ ad-hoc 署名（"-"）にフォールバックする
+# ★AUv3 拡張は entitlements 付きで署名しないと pluginkit に登録されない。ad-hoc でローカル動作は可能だが、
+#   Logic 等の別ホストで読ませるなら Apple Development 以上の証明書を使うこと。
+IDENTITY="${SIGN_IDENTITY:-}"
+if [ -z "$IDENTITY" ]; then
+    IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+        | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)"
+fi
+if [ -z "$IDENTITY" ]; then
+    IDENTITY="-"
+    echo "warning: Apple Development 証明書が見つからないため ad-hoc 署名（-）を使う。" >&2
+    echo "         別ホストで使うなら SIGN_IDENTITY=\"Apple Development: ...\" を指定すること。" >&2
+fi
 ARCH="$(uname -m)"
 TARGET="$ARCH-apple-macos13.0"
 CLANGXX="$(xcrun --find clang++)"
@@ -55,7 +70,7 @@ echo "[4/7] Build Swift standalone app"
 plutil -convert binary1 -o "$APP_BUNDLE/Contents/Info.plist" "$SCRIPT_DIR/Info-App.plist"
 
 echo "[5/7] Locate signing identity"
-if ! security find-identity -v -p codesigning | grep -Fq "$IDENTITY"; then
+if [ "$IDENTITY" != "-" ] && ! security find-identity -v -p codesigning | grep -Fq "$IDENTITY"; then
     echo "error: signing identity is not available to this process:" >&2
     echo "  $IDENTITY" >&2
     echo "Open Keychain Access, import/unlock the certificate and private key, then rerun:" >&2

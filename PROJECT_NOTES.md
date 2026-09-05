@@ -2,7 +2,9 @@
 
 - 発足: 2026-09-04（Claude Fable × Codex gpt-5.6-sol の2往復ブレストで設計を収束）
 - 状態: **D1〜D6 承認済み（2026-09-04）。M0a 実装中（Codex委譲）**。追加条件: ライセンス対応を避けるため**第三者コードをリンクしない**
-- 判断用HTML（正本）: `design/DESIGN_PLAN_2026-09-04.html`
+- ★**`design/` は公開リポジトリに含めない**（`.gitignore`）。判断用HTML・ブレスト生ログ・夜間レポート・試聴ページは手元だけ。
+  GitHub から読む人にとって以下の `design/...` へのリンクは辿れない。
+- 判断用HTML（正本・手元のみ）: `design/DESIGN_PLAN_2026-09-04.html`
 - ブレスト記録: `design/brainstorm/`（Claudeの問い2本・Codexの回答2本の生ログ）と
   `obsidian-vault/ideas/2026-09-04_自作シンセ設計_Claude×Codexブレスト.md`
 - このファイルは別マシンのエージェントが単体で読んで引き継げるよう自己完結的に書く
@@ -55,7 +57,7 @@ M4 AU仕上げ（約3週）→ M5 拡張。M0の合否基準5項目はHTMLに記
 
 - あり: Xcode 26.6、Apple clang 21、`/usr/bin/auval`、Logic Pro、node v22.17.0、Homebrew
 - Apple clang は wasm32 非対応（実測）→ `brew install llvm`（2026-09-04 導入。`/opt/homebrew/opt/llvm/bin/clang`、wasm-ld 同梱）。cmake/emsdk/JUCE は不要
-- コード署名: 「Apple Development: (署名IDは環境に合わせて指定)」の証明書あり（AUv3拡張のローカル署名用）。Logic Pro 12.3
+- コード署名: `Apple Development` 証明書あり（AUv3拡張のローカル署名用。build.sh が自動検出）。Logic Pro 12.3
 - ソースはこのフォルダ。ビルド成果物は iCloud外 `~/build/synth-engine/`。git は `--separate-git-dir ~/git-repos/synth-engine`
 - Claude は音を聴けない。検証は CLIレンダラー基準の差分・FFT・NaN・性能まで。好みのゲートは本人の耳
 
