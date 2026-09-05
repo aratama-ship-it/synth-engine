@@ -18,6 +18,26 @@ const TYPES = {
 
 http.createServer((req, res) => {
   let rel = decodeURIComponent(req.url.split("?")[0]);
+
+  // ブラウザ自己診断（shells/web/selftest.html）の結果を受け取って追記する。
+  // Safari は Claude のブラウザツールから操作できないため、ページ側から結果を送ってもらう。
+  // 127.0.0.1 のみで待ち受けており、書き込み先は下の1ファイルに固定。
+  if (req.method === "POST" && rel === "/report") {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 64 * 1024) { req.destroy(); }
+    });
+    req.on("end", () => {
+      const line = JSON.stringify({ at: new Date().toISOString(), ua: req.headers["user-agent"] || "", body: body.slice(0, 64 * 1024) }) + "\n";
+      fs.mkdirSync(path.join(ROOT, "build"), { recursive: true });
+      fs.appendFileSync(path.join(ROOT, "build", "browser-reports.jsonl"), line);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end('{"ok":true}');
+    });
+    return;
+  }
+
   // `/` はブラウザ版デモへ。試聴ページ（design/listen/）は手元だけの判断用で公開物には含まれない。
   if (rel === "/") { res.writeHead(302, { Location: "/shells/web/demo.html" }); res.end(); return; }
   const target = path.normalize(path.join(ROOT, rel));

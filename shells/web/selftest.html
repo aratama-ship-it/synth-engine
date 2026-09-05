@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>synth-engine ブラウザ自己診断</title>
+<style>
+:root{--bg:#141412;--fg:#EDE9DF;--sub:#8C877B;--ok:#9BD17F;--ng:#E5836B;--wait:#D9C46A;--line:rgba(237,233,223,.14)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,"Hiragino Sans",sans-serif;font-size:16px;line-height:1.6}
+.wrap{max-width:780px;margin:0 auto;padding:20px 18px 60px}
+.ver{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--sub)}
+h1{font-size:22px;margin:6px 0 4px}
+p.lead{color:var(--sub);font-size:14px;margin:0 0 16px}
+.verdict{border:2px solid var(--line);border-radius:14px;padding:16px 18px;margin:14px 0;font-size:20px;font-weight:600}
+.verdict.ok{border-color:var(--ok);color:var(--ok)}
+.verdict.ng{border-color:var(--ng);color:var(--ng)}
+.verdict.wait{border-color:var(--wait);color:var(--wait)}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:10px 0}
+th,td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}
+th{color:var(--sub);font-weight:400;width:42%}
+td.v{font-family:ui-monospace,Menlo,monospace}
+.mark{font-weight:700}
+.mark.ok{color:var(--ok)}.mark.ng{color:var(--ng)}.mark.wait{color:var(--wait)}
+button{background:var(--fg);color:var(--bg);border:0;border-radius:10px;padding:11px 20px;font-size:16px;cursor:pointer;margin:8px 8px 0 0}
+button[disabled]{opacity:.45;cursor:default}
+.note{font-size:13px;color:var(--sub);margin-top:14px}
+</style>
+</head>
+<body><div class="wrap">
+<p class="ver">v0.1.0</p>
+<h1>ブラウザ自己診断</h1>
+<p class="lead">このページは開いた時点で自動的に検査を始めます。<b>音を鳴らす検査だけ、下のボタンを1回押してください。</b>
+（ブラウザは利用者の操作なしに音を鳴らせない決まりのため）</p>
+
+<div id="verdict" class="verdict wait">検査中…</div>
+
+<table id="results"></table>
+
+<button id="play" disabled>音を鳴らす検査（1回押す）</button>
+<button id="copy">結果をコピー</button>
+
+<p class="note">結果はこの Mac の中（127.0.0.1）にだけ記録されます。外部へは送信しません。</p>
+</div>
+<script type="module">
+import { createSynthNode, parsePreset } from "./synth-node.js";
+
+const rows = [];
+const table = document.getElementById("results");
+function add(name, value, state) {
+  rows.push({ name, value: String(value), state });
+  const tr = document.createElement("tr");
+  const mark = state === "ok" ? "OK" : state === "ng" ? "NG" : "—";
+  tr.innerHTML = `<th>${name}</th><td class="v">${value}</td><td class="mark ${state}">${mark}</td>`;
+  table.appendChild(tr);
+}
+function setVerdict(text, cls) {
+  const el = document.getElementById("verdict");
+  el.textContent = text; el.className = "verdict " + cls;
+}
+const db = (x) => (x > 0 ? (20 * Math.log10(x)).toFixed(1) + " dBFS" : "-inf");
+
+function parseWav(buffer) {
+  const view = new DataView(buffer);
+  let pos = 12, fmt = null, data = null;
+  while (pos + 8 <= buffer.byteLength) {
+    const id = String.fromCharCode(view.getUint8(pos), view.getUint8(pos + 1), view.getUint8(pos + 2), view.getUint8(pos + 3));
+    const size = view.getUint32(pos + 4, true);
+    if (id === "fmt ") fmt = { ch: view.getUint16(pos + 10, true), sr: view.getUint32(pos + 12, true) };
+    if (id === "data") data = { off: pos + 8, size };
+    pos += 8 + size + (size & 1);
+  }
+  const n = data.size / 4, out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = view.getFloat32(data.off + i * 4, true);
+  return { fmt, samples: out };
+}
+
+function parseEvents(text) {
+  const events = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/#.*$/, "").trim();
+    if (!line) continue;
+    const f = line.split(/\s+/).map(Number);
+    if (f.length >= 5) events.push({ frame: f[0], kind: f[1], id: f[2], a: f[3], b: f[4] });
+  }
+  return events.sort((x, y) => x.frame - y.frame);
+}
+
+const state = { pass: 0, fail: 0 };
+function check(cond) { if (cond) state.pass++; else state.fail++; return cond ? "ok" : "ng"; }
+
+async function run() {
+  add("ブラウザ", navigator.userAgent.slice(0, 90), "wait");
+  add("AudioWorklet に対応", "AudioWorkletNode" in window ? "はい" : "いいえ", check("AudioWorkletNode" in window));
+  add("WebAssembly に対応", typeof WebAssembly === "object" ? "はい" : "いいえ", check(typeof WebAssembly === "object"));
+  add("OfflineAudioContext に対応", typeof OfflineAudioContext === "function" ? "はい" : "いいえ", check(typeof OfflineAudioContext === "function"));
+
+  let wasmBytes, presetText, eventText, nativeWav;
+  try {
+    const t0 = performance.now();
+    [wasmBytes, presetText, eventText, nativeWav] = await Promise.all([
+      fetch("../../build/synth_engine.wasm").then((r) => r.arrayBuffer()),
+      fetch("../../presets/m0_saw.txt").then((r) => r.text()),
+      fetch("../../fixtures/m0_events_chord.txt").then((r) => r.text()),
+      fetch("../../build/out.wav").then((r) => r.arrayBuffer()),
+    ]);
+    add("wasm の読み込み", `${wasmBytes.byteLength.toLocaleString()} バイト / ${(performance.now() - t0).toFixed(0)} ms`, check(wasmBytes.byteLength > 0));
+  } catch (error) {
+    add("素材の読み込み", String(error), check(false));
+    finish(); return;
+  }
+
+  try {
+    const sampleRate = 48000, seconds = 2;
+    const t0 = performance.now();
+    const context = new OfflineAudioContext(2, sampleRate * seconds, sampleRate);
+    const synth = await createSynthNode(context, wasmBytes.slice(0));
+    synth.connect(context.destination);
+    const ready = await synth.batch(parsePreset(presetText), parseEvents(eventText));
+    add("Worklet の起動（オフライン）", `${ready.readyMs.toFixed(0)} ms`, check(true));
+    const rendered = await context.startRendering();
+    add("オフラインレンダー", `${(performance.now() - t0).toFixed(0)} ms で ${rendered.length.toLocaleString()} フレーム`, check(rendered.length === sampleRate * seconds));
+
+    const left = rendered.getChannelData(0);
+    let peak = 0, nan = 0;
+    for (let i = 0; i < left.length; i++) { const v = left[i]; if (!Number.isFinite(v)) nan++; else peak = Math.max(peak, Math.abs(v)); }
+    add("音が出ているか（ピーク）", db(peak), check(peak > 0.01));
+    add("NaN / Inf", String(nan), check(nan === 0));
+
+    const native = parseWav(nativeWav);
+    const n = Math.min(left.length, native.samples.length / native.fmt.ch);
+    let maxDiff = 0, sumSq = 0;
+    for (let i = 0; i < n; i++) { const d = Math.abs(left[i] - native.samples[i * native.fmt.ch]); if (d > maxDiff) maxDiff = d; sumSq += d * d; }
+    const rmsDiff = Math.sqrt(sumSq / n);
+    const within = maxDiff < 1e-5 && rmsDiff < 1e-6;
+    add("Mac のネイティブ版との差（最大）", db(maxDiff) + "（基準 −100 dBFS 以下）", check(maxDiff < 1e-5));
+    add("同（RMS）", db(rmsDiff) + "（基準 −120 dBFS 以下）", check(rmsDiff < 1e-6));
+    if (!within) add("補足", "差が基準を超えています", "ng");
+  } catch (error) {
+    add("オフラインレンダー", String(error), check(false));
+  }
+  document.getElementById("play").disabled = false;
+  finish();
+}
+
+function finish() {
+  if (state.fail === 0) setVerdict(`自動検査 ${state.pass} 項目すべて合格 — 残りは下のボタンだけ`, "ok");
+  else setVerdict(`${state.fail} 項目が不合格（合格 ${state.pass}）`, "ng");
+  report();
+}
+
+async function report() {
+  try {
+    await fetch("/report", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page: "selftest", pass: state.pass, fail: state.fail, rows }) });
+  } catch { /* 記録できなくても検査自体は続ける */ }
+}
+
+document.getElementById("play").addEventListener("click", async (event) => {
+  event.target.disabled = true;
+  try {
+    const context = new AudioContext();
+    await context.resume();
+    const wasmBytes = await fetch("../../build/synth_engine.wasm").then((r) => r.arrayBuffer());
+    const presetText = await fetch("../../presets/m1b_filter_sweep.txt").then((r) => r.text());
+    const synth = await createSynthNode(context, wasmBytes);
+    synth.connect(context.destination);
+    for (const [id, value] of parsePreset(presetText)) synth.setParam(id, value);
+    add("実際に音を鳴らす", `AudioContext 起動 ${context.sampleRate} Hz・状態 ${context.state}`, check(context.state === "running"));
+    const notes = [60, 64, 67];
+    notes.forEach((note, index) => setTimeout(() => synth.noteOn(200 + index, note, 1.0), index * 260));
+    notes.forEach((note, index) => setTimeout(() => synth.noteOff(200 + index), 1600 + index * 60));
+    setTimeout(() => { add("発音の指示", "3音を鳴らしました（聞こえましたか？）", "wait"); finish(); }, 2200);
+  } catch (error) {
+    add("実際に音を鳴らす", String(error), check(false)); finish();
+  }
+});
+
+document.getElementById("copy").addEventListener("click", () => {
+  const text = rows.map((r) => `${r.name}: ${r.value} [${r.state}]`).join("\n");
+  navigator.clipboard?.writeText(text);
+});
+
+run();
+</script>
+</body></html>
