@@ -1,7 +1,8 @@
-# Synth Engine M1b
+# Synth Engine M1c
 
 SPEC_M0a.md の縦切りスパイクに、SPEC_M1a.md のWT OSC A/B、ユニゾン、B→A位相変調、
-サブ、ノイズ、およびSPEC_M1b.mdのTPT/ZDF SVF、フィルタEG、LFOを追加した実装です。
+サブ、ノイズ、SPEC_M1b.mdのTPT/ZDF SVF、フィルタEG、LFO、および
+SPEC_M1c.mdの6スロット・モジュレーションマトリクスとマクロ2本を追加した実装です。
 第三者コードや外部ライブラリを含まず、DSPコアは
 C++標準ライブラリ、動的確保、例外、RTTI、ロックを使いません。公開面は
 core/include/synth_engine.h のC ABIです。
@@ -38,7 +39,7 @@ core/include/synth_engine.h のC ABIです。
 内蔵wavetableのslotは 0 basic（sine→triangle→saw→squareの4フレーム）、
 1 saw、2 square、3 triangleです。slot 0だけがmorphでフレーム間を移動します。
 
-## パラメータ一覧（engine version 5）
+## パラメータ一覧（engine version 6）
 
 | ID | 名前 | 範囲 | 既定 |
 |---:|---|---:|---:|
@@ -97,6 +98,26 @@ core/include/synth_engine.h のC ABIです。
 | 52 | lfoPhase | 0..1 | 0 |
 | 53 | ampEgCurve | 0..1 | 0 |
 | 54 | filterEgCurve | 0..1 | 0 |
+| 55 | modSlot0Source | 0..7 int | 0 |
+| 56 | modSlot0Dest | 0..13 int | 0 |
+| 57 | modSlot0Amount | -1..1 | 0 |
+| 58 | modSlot1Source | 0..7 int | 0 |
+| 59 | modSlot1Dest | 0..13 int | 0 |
+| 60 | modSlot1Amount | -1..1 | 0 |
+| 61 | modSlot2Source | 0..7 int | 0 |
+| 62 | modSlot2Dest | 0..13 int | 0 |
+| 63 | modSlot2Amount | -1..1 | 0 |
+| 64 | modSlot3Source | 0..7 int | 0 |
+| 65 | modSlot3Dest | 0..13 int | 0 |
+| 66 | modSlot3Amount | -1..1 | 0 |
+| 67 | modSlot4Source | 0..7 int | 0 |
+| 68 | modSlot4Dest | 0..13 int | 0 |
+| 69 | modSlot4Amount | -1..1 | 0 |
+| 70 | modSlot5Source | 0..7 int | 0 |
+| 71 | modSlot5Dest | 0..13 int | 0 |
+| 72 | modSlot5Amount | -1..1 | 0 |
+| 73 | macro1 | 0..1 | 0 |
+| 74 | macro2 | 0..1 | 0 |
 
 filterModeは0=LP12、1=BP12、2=HP12、3=Notch、4=LP24、5=HP24です。
 lfoShapeは0=sine、1=triangle、2=saw上行、3=saw下行、4=square、5=S&Hです。
@@ -105,6 +126,20 @@ ampEgCurveとfilterEgCurveは、各EGのディケイ／リリースに共通し�
 アタックは従来どおり直線です。curve=0は従来の演算経路と終了判定をそのまま使います。
 curve>0では進行度を経過サンプル数から求め、ディケイ／リリースの区間長は指定秒ちょうど
 （端数がある場合は目標へ到達する最初のサンプル）になります。
+
+モジュレーションのSourceは0=なし、1=LFO、2=アンプEG、3=フィルタEG、4=ベロシティ、
+5=ノート位置、6=macro1、7=macro2です。ノート位置は`(midiNote - 60) / 60`を
+-1..1へクランプします。Destinationは0=なし、1=Osc A Level、2=Osc B Level、
+3=Osc A Morph、4=Osc B Morph、5=FM B→A、6=Sub Level、7=Noise Level、
+8=Filter Cutoff、9=Filter Resonance、10=全オシレータPitch、11=Osc A Detune、
+12=LFO Rate、13=ボイスAmpです。full量は順に4、4、1、1、1、4、4、8 octave、
+1、1200 cent、50 cent、8 octave、1です。
+
+同じDestinationへの寄与は6スロット分を合算してから1回だけクランプします。
+LFO Rateだけは全ボイス共通で、ボイス0のSource値を評価した結果を使います。
+`SYNTH_EV_MACRO`はid 0/1をmacro1/2へ割り当て、`a`を0..1へクランプし、
+指定offsetから反映します。未知idは無視件数へ加算します。パラメータ73/74とイベントの
+どちらから設定しても5 ms時定数の一次スムーサを通り、create/reset時は目標値へスナップします。
 
 ## WASM
 
@@ -116,7 +151,7 @@ WASM_CLANG が未設定なら成功扱いでskipを表示します。LLVM clang�
 
     WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang make wasm
 
-## テスト41項目
+## テスト48項目
 
 tests/test_main.cpp はフレームワークを使わず、次を測定します。
 
@@ -138,7 +173,7 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 16. サブの周波数ピーク
 17. ノイズ減衰とseed決定論
 18. 100 Hz〜10 kHzのピンクノイズ傾斜
-19. 全55パラメータのmin/default/maxスイープ
+19. 全75パラメータのmin/default/maxスイープ
 20. 16音・両OSC 4 unison・サブ・ノイズの処理時間
 21. M1a全構成のblock 1/7/64/128/511ビット一致
 22. M0 saw／M1 unisonの基準WAVとのビット一致
@@ -154,13 +189,20 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 32. フィルタ＋LFO有効時のblock 1/7/64/128/511ビット一致
 33. 全M1b機能有効時のreset後レンダー決定論
 34. LP24・LFO・16音×unison 4の平均／p99処理時間と期限判定
-35. curve=0を明示したM0 saw／M1 unisonの基準WAVとのビット一致、および55パラメータのメタデータ
+35. curve=0を明示したM0 saw／M1 unisonの基準WAVとのビット一致、および75パラメータのメタデータ
 36. 直線フィルタEGのディケイ25%／50%／75%時点での実測値
 37. curve 0／0.5／1でエンベロープが0.5へ落ちる時刻の単調増加
 38. curve、decay、releaseの全80組合せでNaN／Inf、振幅上限、リリース後のボイス解放
 39. M0a sawをM1b-3基準WAV `/tmp/g3_m0.wav` と比較したビット一致
 40. 同じ演奏のイベントIDだけを変更したM1 unison／M1b filter sweepのビット一致
 41. M1 unisonの変更前後におけるRMS差1 dB以内／スペクトル重心差10%以内
+42. 全スロット無効時のM0 saw／M1 unison／M1b filter sweepとG4基準WAVのビット一致
+43. LFO／アンプEG／フィルタEG／ベロシティ／ノート位置／macro1／macro2の7信号源
+44. 13送り先それぞれのRMS差1 dB以上またはスペクトル重心差5%以上
+45. Filter Cutoffへ同量を2スロットから送ったときの変化幅が1スロット時の2倍±20%
+46. frame 24000のmacroイベント、5 msスムーサ、未知macro idの無視件数
+47. 6スロット有効時のblock 1／7／64／128／511ビット一致とreset後の再レンダー一致
+48. 6スロット・LP24・LFO・16音×unison 4の平均／p99処理時間と期限判定
 
 エイリアス測定は4-term Blackman-Harris窓を使い、基音電力に対する「基音より上、かつ
 期待される第1〜4倍音の各±10 binを除いた電力」の比です。MIDI 108では選択される
@@ -189,11 +231,19 @@ mipの倍音上限が4のため、この4倍音を期待成分とします。
 - curve 0は既存コードパスを維持し、既定プリセットの出力とビット一致
 - curve>0はリリース開始時のEG値を保持し、指定した区間長の終端で目標値へ到達
 
+## M1cで確定した事項
+
+- モジュレーションマトリクスは6スロット固定で、7信号源と13送り先を持つ
+- 単極性／双極性のSource値は変換せず、`source * amount * full`を送り先へ加算する
+- 同じ送り先の全寄与を合算した後に1回だけクランプする
+- 評価はサンプルごと・ボイスごと。LFO Rateだけはボイス0の評価を全ボイスで共有する
+- マクロ2本はパラメータ73/74または`SYNTH_EV_MACRO` id 0/1から設定し、5 msで平滑化する
+- 全スロット無効時は既存M0／M1a／M1bの信号経路を維持し、G4基準WAVとビット一致する
+
 ## 未決事項
 
 SPECにないため、以下は公開仕様として確定していません。括弧内は現在の挙動です。
 
-- SYNTH_EV_MACRO の割当先（イベント順序には参加するがM0aでは音声変化なし）
 - 未知のイベントkindの扱い（音声変化なし）
 - OSC Aが1 unisonかつM1a音源がすべて無効なときのphaseMode=0は、M0aビット互換のため
   0.25 cycle開始を維持する。ユニゾン使用時は経路非依存なstartOrderを使ったhash開始とする
@@ -224,6 +274,10 @@ SPECにないため、以下は公開仕様として確定していません。�
   （現在はcycleIndex 0をhashし、globalはvoiceIndex 0xffffffff、layerは32）
 - S&HのcycleIndexが2^32を超えた後のhash規則
   （現在はhash入力にcycleIndexの下位32 bitを使う）
+- lfoRetrigger有効中にボイス0が非アクティブな場合のLFO Rate送り先の評価規則
+  （現在はclear後のボイス0 LFO値を使い、ボイス依存Sourceは0として評価する）
+- マクロの一次スムーサにおける「5 ms」の厳密な到達判定
+  （現在は既存カットオフと同じ5 ms時定数で、5 ms後に目標差の約63.2%を消化する）
 - `m1b_filter_sweep` のSPEC未指定値
   （現在はcutoff 200 Hz、filterEgSustain 0、filterEgCurve 0.8）
 - `m1b_wobble` のSPEC未指定値
@@ -232,6 +286,10 @@ SPECにないため、以下は公開仕様として確定していません。�
   （現在は23/28の−3 dB測定をresonance 0.294415、24をcutoff 1000 Hz・resonance 0、
   25をLP12・cutoff 1000 Hz、26をLP12・cutoff 1000 Hz、27をcutoff 1000 Hz、
   29をLP24・cutoff 200 Hz・sustain 0、30をrate 5 Hzで実行）
+- テスト43〜48でSPECが指定していない測定用パラメータ
+  （現在は固定位相の内蔵波形を基準にし、44は送り先ごとに発音源とLFO初期位相を設定、
+  45はwhite noise・LP24・cutoff 1000 Hz・amount 0.0625、46はmacro1→Osc A Level、
+  48はmacro1=0.5・macro2=0.25で実行）
 
 ## native と wasm の比較（Claude追記 2026-09-04）
 

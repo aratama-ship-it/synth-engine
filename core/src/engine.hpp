@@ -67,6 +67,7 @@ struct SynthEngine {
     double filterCutoffSmoothed;
     double filterResonanceSmoothed;
     double filterSmoothingCoefficient;
+    double macroSmoothed[2];
     double globalLfoPhase;
     uint64_t globalLfoCycleIndex;
     float globalLfoHold;

@@ -77,6 +77,26 @@ inline constexpr SynthParamInfo kParameterInfo[] = {
     {52, "lfoPhase", "LFO Phase", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
     {53, "ampEgCurve", "Amp EG Curve", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
     {54, "filterEgCurve", "Filter EG Curve", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
+    {55, "modSlot0Source", "Mod 1 Source", 0.0f, 7.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {56, "modSlot0Dest", "Mod 1 Destination", 0.0f, 13.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {57, "modSlot0Amount", "Mod 1 Amount", -1.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_BIPOLAR},
+    {58, "modSlot1Source", "Mod 2 Source", 0.0f, 7.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {59, "modSlot1Dest", "Mod 2 Destination", 0.0f, 13.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {60, "modSlot1Amount", "Mod 2 Amount", -1.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_BIPOLAR},
+    {61, "modSlot2Source", "Mod 3 Source", 0.0f, 7.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {62, "modSlot2Dest", "Mod 3 Destination", 0.0f, 13.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {63, "modSlot2Amount", "Mod 3 Amount", -1.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_BIPOLAR},
+    {64, "modSlot3Source", "Mod 4 Source", 0.0f, 7.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {65, "modSlot3Dest", "Mod 4 Destination", 0.0f, 13.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {66, "modSlot3Amount", "Mod 4 Amount", -1.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_BIPOLAR},
+    {67, "modSlot4Source", "Mod 5 Source", 0.0f, 7.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {68, "modSlot4Dest", "Mod 5 Destination", 0.0f, 13.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {69, "modSlot4Amount", "Mod 5 Amount", -1.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_BIPOLAR},
+    {70, "modSlot5Source", "Mod 6 Source", 0.0f, 7.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {71, "modSlot5Dest", "Mod 6 Destination", 0.0f, 13.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {72, "modSlot5Amount", "Mod 6 Amount", -1.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_BIPOLAR},
+    {73, "macro1", "Macro 1", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
+    {74, "macro2", "Macro 2", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
 };
 
 inline constexpr uint32_t kParamCount =
@@ -89,7 +109,7 @@ constexpr bool parameter_ids_are_contiguous() {
     return true;
 }
 
-static_assert(kParamCount == 55);
+static_assert(kParamCount == 75);
 static_assert(parameter_ids_are_contiguous());
 
 }  // namespace synth

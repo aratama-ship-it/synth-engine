@@ -59,11 +59,26 @@ enum ParamId : uint32_t {
     kLfoToAmp = 51,
     kLfoPhase = 52,
     kAmpEgCurve = 53,
-    kFilterEgCurve = 54
+    kFilterEgCurve = 54,
+    kModSlotBase = 55,
+    kMacro1 = 73,
+    kMacro2 = 74
 };
 
+constexpr uint32_t kModSlotCount = 6;
+constexpr uint32_t kModSlotStride = 3;
+constexpr uint32_t kModDestinationCount = 14;
 constexpr uint32_t kLfoHashLayer = 32u;
 constexpr uint32_t kGlobalLfoIndex = 0xffffffffu;
+
+struct ModulationValues {
+    float destination[kModDestinationCount];
+};
+
+constexpr float kModDestinationFull[kModDestinationCount] = {
+    0.0f, 4.0f, 4.0f, 1.0f, 1.0f, 1.0f, 4.0f,
+    4.0f, 8.0f, 1.0f, 1200.0f, 50.0f, 8.0f, 1.0f
+};
 
 float rounded_integer(float value, float low, float high) {
     value = synth::clampf(value, low, high);
@@ -172,6 +187,8 @@ float lfo_hash_value(const SynthEngine* engine, uint64_t cycleIndex, uint32_t vo
 void reset_modulators(SynthEngine* engine) {
     engine->filterCutoffSmoothed = static_cast<double>(engine->params[kFilterCutoff]);
     engine->filterResonanceSmoothed = static_cast<double>(engine->params[kFilterResonance]);
+    engine->macroSmoothed[0] = static_cast<double>(engine->params[kMacro1]);
+    engine->macroSmoothed[1] = static_cast<double>(engine->params[kMacro2]);
     engine->globalLfoPhase = static_cast<double>(engine->params[kLfoPhase]);
     engine->globalLfoCycleIndex = 0;
     engine->globalLfoHold = lfo_hash_value(engine, 0, kGlobalLfoIndex);
@@ -230,6 +247,15 @@ bool m1b_bypassed(const SynthEngine* engine) {
            engine->params[kLfoToCutoff] == 0.0f &&
            engine->params[kLfoToPitch] == 0.0f &&
            engine->params[kLfoToAmp] == 0.0f;
+}
+
+bool modulation_matrix_active(const SynthEngine* engine) {
+    for (uint32_t slot = 0; slot < kModSlotCount; ++slot) {
+        const uint32_t base = kModSlotBase + slot * kModSlotStride;
+        if (engine->params[base] != 0.0f && engine->params[base + 1] != 0.0f &&
+            engine->params[base + 2] != 0.0f) return true;
+    }
+    return false;
 }
 
 synth::Voice* choose_voice(SynthEngine* engine, uint32_t noteId) {
@@ -444,7 +470,11 @@ float advance_envelope(SynthEngine* engine, synth::Voice* voice) {
 }
 
 void apply_event_param(SynthEngine* engine, const SynthEvent& event) {
-    if (event.kind == SYNTH_EV_PARAM) (void)synth_set_param(engine, event.id, event.a);
+    if (event.kind == SYNTH_EV_PARAM) {
+        (void)synth_set_param(engine, event.id, event.a);
+    } else if (event.kind == SYNTH_EV_MACRO && event.id < 2u) {
+        (void)synth_set_param(engine, kMacro1 + event.id, event.a);
+    }
 }
 
 void advance_oscillators(synth::Voice* voice, double sampleRate) {
@@ -487,6 +517,58 @@ void advance_lfo(double* phase, uint64_t* cycleIndex, float* held,
         *cycleIndex += wraps;
         *held = lfo_hash_value(engine, *cycleIndex, voiceIndex);
     }
+}
+
+void advance_lfo_at_rate(double* phase, uint64_t* cycleIndex, float* held,
+                         const SynthEngine* engine, uint32_t voiceIndex, double rate) {
+    const double advanced = *phase + rate / engine->sampleRate;
+    const uint64_t wraps = static_cast<uint64_t>(advanced);
+    *phase = advanced - static_cast<double>(wraps);
+    if (wraps != 0) {
+        *cycleIndex += wraps;
+        *held = lfo_hash_value(engine, *cycleIndex, voiceIndex);
+    }
+}
+
+float modulation_source(const SynthEngine* engine, const synth::Voice* voice,
+                        uint32_t source, float lfo) {
+    if (source == 1u) return lfo;
+    if (source == 6u) return static_cast<float>(engine->macroSmoothed[0]);
+    if (source == 7u) return static_cast<float>(engine->macroSmoothed[1]);
+    if (voice == 0 || voice->active == 0) return 0.0f;
+    if (source == 2u) return voice->envelope;
+    if (source == 3u) return voice->filterEnvelope;
+    if (source == 4u) return voice->velocity;
+    if (source == 5u) return synth::clampf((voice->midiNote - 60.0f) / 60.0f, -1.0f, 1.0f);
+    return 0.0f;
+}
+
+void evaluate_modulation(const SynthEngine* engine, const synth::Voice* voice,
+                         float lfo, ModulationValues* values) {
+    for (uint32_t destination = 0; destination < kModDestinationCount; ++destination)
+        values->destination[destination] = 0.0f;
+    for (uint32_t slot = 0; slot < kModSlotCount; ++slot) {
+        const uint32_t base = kModSlotBase + slot * kModSlotStride;
+        const uint32_t source = static_cast<uint32_t>(engine->params[base]);
+        const uint32_t destination = static_cast<uint32_t>(engine->params[base + 1]);
+        if (source == 0u || destination == 0u || destination >= kModDestinationCount) continue;
+        values->destination[destination] += modulation_source(engine, voice, source, lfo) *
+            engine->params[base + 2] * kModDestinationFull[destination];
+    }
+}
+
+double modulation_lfo_rate(const SynthEngine* engine, uint32_t lfoShape, float globalLfo) {
+    const synth::Voice* voice = &engine->voices[0];
+    const bool retrigger = engine->params[kLfoRetrigger] != 0.0f;
+    const float lfo = retrigger
+        ? lfo_value(lfoShape, voice->lfoPhase, voice->lfoHold) : globalLfo;
+    ModulationValues modulation{};
+    evaluate_modulation(engine, voice, lfo, &modulation);
+    double rate = static_cast<double>(engine->params[kLfoRate]) *
+        synth::exp2_fast(static_cast<double>(modulation.destination[12]));
+    if (rate < 0.01) rate = 0.01;
+    if (rate > 40.0) rate = 40.0;
+    return rate;
 }
 
 float render_noise(SynthEngine* engine, synth::Voice* voice) {
@@ -702,6 +784,164 @@ void render_m1b_voice(SynthEngine* engine, synth::Voice* voice, float lfo,
     advance_modulated_oscillators(voice, engine->sampleRate, pitchFactor);
 }
 
+void advance_m1c_oscillators(synth::Voice* voice, double sampleRate,
+                             double pitchFactor, double detuneDeltaCents,
+                             uint32_t unisonA) {
+    for (uint32_t i = 0; i < synth::kMaxUnison; ++i) {
+        const double detuneFactor = synth::exp2_fast(
+            detuneDeltaCents * unison_position(i, unisonA) / 1200.0);
+        voice->phaseA[i] = wrap_phase(
+            voice->phaseA[i] + voice->frequencyA[i] * pitchFactor * detuneFactor / sampleRate);
+        voice->phaseB[i] = wrap_phase(
+            voice->phaseB[i] + voice->frequencyB[i] * pitchFactor / sampleRate);
+    }
+    voice->phaseSub = wrap_phase(
+        voice->phaseSub + voice->frequencySub * pitchFactor / sampleRate);
+    ++voice->sampleIndex;
+}
+
+void apply_m1c_voice_filter(SynthEngine* engine, synth::Voice* voice, float lfo,
+                            const ModulationValues& modulation,
+                            float* left, float* right) {
+    if (engine->params[kFilterEnabled] == 0.0f) return;
+    const double velocityDepth = 1.0 - static_cast<double>(engine->params[kFilterVelToEnv]) +
+        static_cast<double>(engine->params[kFilterVelToEnv]) * static_cast<double>(voice->velocity);
+    const double octaves = static_cast<double>(engine->params[kFilterKeyTrack]) *
+            (static_cast<double>(voice->midiNote) - 60.0) / 12.0 +
+        static_cast<double>(engine->params[kFilterEnvAmount]) * velocityDepth *
+            static_cast<double>(voice->filterEnvelope) +
+        static_cast<double>(engine->params[kLfoToCutoff]) * static_cast<double>(lfo) +
+        static_cast<double>(modulation.destination[8]);
+    double cutoff = engine->filterCutoffSmoothed * synth::exp2_fast(octaves);
+    const double maximum = 0.45 * engine->sampleRate;
+    if (cutoff < 20.0) cutoff = 20.0;
+    if (cutoff > maximum) cutoff = maximum;
+    const double resonance = static_cast<double>(synth::clampf(
+        static_cast<float>(engine->filterResonanceSmoothed) + modulation.destination[9],
+        0.0f, 1.0f));
+    const double g = synth::tan_pi_normalized(cutoff / engine->sampleRate);
+    const double k = 2.0 - 1.99 * resonance;
+    const double a1 = 1.0 / (1.0 + g * (g + k));
+    const double a2 = g * a1;
+    const double a3 = g * a2;
+    const uint32_t mode = static_cast<uint32_t>(engine->params[kFilterMode]);
+    float* channels[2] = {left, right};
+    for (uint32_t channel = 0; channel < 2; ++channel) {
+        double output = process_svf_stage(static_cast<double>(*channels[channel]),
+            &voice->filter[channel][0], mode, a1, a2, a3, k);
+        if (mode >= 4) {
+            output = process_svf_stage(output, &voice->filter[channel][1],
+                mode, a1, a2, a3, k);
+        }
+        *channels[channel] = static_cast<float>(output);
+    }
+}
+
+void render_m1c_voice(SynthEngine* engine, synth::Voice* voice, float lfo,
+                      const ModulationValues& modulation,
+                      float* left, float* right) {
+    const uint32_t countA = static_cast<uint32_t>(engine->params[kOscAUnison]);
+    const uint32_t countB = static_cast<uint32_t>(engine->params[kOscBUnison]);
+    const float normalizationA = unison_normalization(countA);
+    const float normalizationB = unison_normalization(countB);
+    const uint32_t slotA = static_cast<uint32_t>(engine->params[kOscWavetable]);
+    const uint32_t slotB = static_cast<uint32_t>(engine->params[kOscBWavetable]);
+    const float levelA = synth::clampf(
+        engine->params[kOscLevel] + modulation.destination[1], 0.0f, 4.0f);
+    const float levelB = synth::clampf(
+        engine->params[kOscBLevel] + modulation.destination[2], 0.0f, 4.0f);
+    const float morphA = synth::clampf(
+        engine->params[kOscMorph] + modulation.destination[3], 0.0f, 1.0f);
+    const float morphB = synth::clampf(
+        engine->params[kOscBMorph] + modulation.destination[4], 0.0f, 1.0f);
+    const float fmBToA = synth::clampf(
+        engine->params[kFmBToA] + modulation.destination[5], 0.0f, 1.0f);
+    const float subLevel = synth::clampf(
+        engine->params[kSubLevel] + modulation.destination[6], 0.0f, 4.0f);
+    const float noiseLevel = synth::clampf(
+        engine->params[kNoiseLevel] + modulation.destination[7], 0.0f, 4.0f);
+    const float detuneA = synth::clampf(
+        engine->params[kOscADetune] + modulation.destination[11], 0.0f, 50.0f);
+    const double detuneDeltaCents =
+        static_cast<double>(detuneA - engine->params[kOscADetune]);
+    const double pitchCents =
+        static_cast<double>(engine->params[kLfoToPitch]) * static_cast<double>(lfo) +
+        static_cast<double>(modulation.destination[10]);
+    const double pitchFactor = synth::exp2_fast(pitchCents / 1200.0);
+
+    float bMod = 0.0f;
+    for (uint32_t i = 0; i < countB; ++i) {
+        const uint32_t mip = synth::select_mip(
+            voice->frequencyB[i] * pitchFactor, engine->sampleRate);
+        bMod += synth::read_wavetable(&engine->wavetable, slotB,
+            morphB, mip, voice->phaseB[i]);
+    }
+    bMod *= normalizationB;
+
+    float voiceLeft = 0.0f;
+    float voiceRight = 0.0f;
+    for (uint32_t i = 0; i < countA; ++i) {
+        const double detuneFactor = synth::exp2_fast(
+            detuneDeltaCents * unison_position(i, countA) / 1200.0);
+        double readPhase = voice->phaseA[i];
+        if (fmBToA != 0.0f) {
+            readPhase = wrap_phase(readPhase +
+                static_cast<double>(fmBToA) * 2.0 * static_cast<double>(bMod));
+        }
+        const uint32_t mip = synth::select_mip(
+            voice->frequencyA[i] * pitchFactor * detuneFactor, engine->sampleRate);
+        const float sample = synth::read_wavetable(&engine->wavetable, slotA,
+            morphA, mip, readPhase) * normalizationA * levelA;
+        float gainLeft = 0.0f;
+        float gainRight = 0.0f;
+        pan_gains(i, countA, engine->params[kOscAWidth], &gainLeft, &gainRight);
+        voiceLeft += sample * gainLeft;
+        voiceRight += sample * gainRight;
+    }
+
+    if (levelB != 0.0f) {
+        for (uint32_t i = 0; i < countB; ++i) {
+            const uint32_t mip = synth::select_mip(
+                voice->frequencyB[i] * pitchFactor, engine->sampleRate);
+            const float sample = synth::read_wavetable(&engine->wavetable, slotB,
+                morphB, mip, voice->phaseB[i]) * normalizationB * levelB;
+            float gainLeft = 0.0f;
+            float gainRight = 0.0f;
+            pan_gains(i, countB, engine->params[kOscBWidth], &gainLeft, &gainRight);
+            voiceLeft += sample * gainLeft;
+            voiceRight += sample * gainRight;
+        }
+    }
+
+    if (subLevel != 0.0f) {
+        static constexpr uint32_t subSlots[3] = {0u, 3u, 2u};
+        const uint32_t shape = static_cast<uint32_t>(engine->params[kSubShape]);
+        const uint32_t mip = synth::select_mip(
+            voice->frequencySub * pitchFactor, engine->sampleRate);
+        const float sub = synth::read_wavetable(&engine->wavetable, subSlots[shape], 0.0f,
+            mip, voice->phaseSub) * subLevel;
+        voiceLeft += sub;
+        voiceRight += sub;
+    }
+
+    if (noiseLevel != 0.0f) {
+        const float noise = render_noise(engine, voice) * noiseLevel;
+        voiceLeft += noise;
+        voiceRight += noise;
+    }
+    voice->noiseEnvelope *= engine->noiseDecayCoefficient;
+
+    apply_m1c_voice_filter(engine, voice, lfo, modulation, &voiceLeft, &voiceRight);
+    const float ampLfo = 1.0f - engine->params[kLfoToAmp] *
+        (1.0f - (0.5f + 0.5f * lfo));
+    const float modulatedAmp = synth::clampf(1.0f + modulation.destination[13], 0.0f, 2.0f);
+    const float voiceGain = voice->velocity * voice->envelope * ampLfo * modulatedAmp;
+    *left += voiceLeft * voiceGain;
+    *right += voiceRight * voiceGain;
+    advance_m1c_oscillators(
+        voice, engine->sampleRate, pitchFactor, detuneDeltaCents, countA);
+}
+
 }  // namespace
 
 extern "C" size_t synth_state_size(void) {
@@ -790,7 +1030,10 @@ extern "C" int synth_process(SynthEngine* engine, const SynthEvent* events, uint
     if (engine == 0 || outL == 0 || outR == 0 || (events == 0 && nEvents != 0)) return -1;
     if (nFrames > engine->maxBlock) return -2;
     int ignored = 0;
-    for (uint32_t e = 0; e < nEvents; ++e) if (events[e].offset >= nFrames) ++ignored;
+    for (uint32_t e = 0; e < nEvents; ++e) {
+        if (events[e].offset >= nFrames) ++ignored;
+        else if (events[e].kind == SYNTH_EV_MACRO && events[e].id >= 2u) ++ignored;
+    }
     for (uint32_t frame = 0; frame < nFrames; ++frame) {
         for (uint32_t e = 0; e < nEvents; ++e)
             if (events[e].offset == frame && events[e].kind == SYNTH_EV_NOTE_OFF)
@@ -808,11 +1051,16 @@ extern "C" int synth_process(SynthEngine* engine, const SynthEvent* events, uint
         engine->filterResonanceSmoothed += engine->filterSmoothingCoefficient *
             (static_cast<double>(engine->params[kFilterResonance]) -
              engine->filterResonanceSmoothed);
+        engine->macroSmoothed[0] += engine->filterSmoothingCoefficient *
+            (static_cast<double>(engine->params[kMacro1]) - engine->macroSmoothed[0]);
+        engine->macroSmoothed[1] += engine->filterSmoothingCoefficient *
+            (static_cast<double>(engine->params[kMacro2]) - engine->macroSmoothed[1]);
         const uint32_t lfoShape = static_cast<uint32_t>(engine->params[kLfoShape]);
         const float globalLfo = lfo_value(
             lfoShape, engine->globalLfoPhase, engine->globalLfoHold);
+        const bool matrixActive = modulation_matrix_active(engine);
 
-        if (legacy_configuration(engine)) {
+        if (!matrixActive && legacy_configuration(engine)) {
             float output = 0.0f;
             for (uint32_t voiceIndex = 0; voiceIndex < engine->voiceLimit; ++voiceIndex) {
                 synth::Voice* voice = &engine->voices[voiceIndex];
@@ -842,7 +1090,31 @@ extern "C" int synth_process(SynthEngine* engine, const SynthEvent* events, uint
 
         float left = 0.0f;
         float right = 0.0f;
-        if (m1b_bypassed(engine)) {
+        double modulatedLfoRate = static_cast<double>(engine->params[kLfoRate]);
+        if (matrixActive) {
+            const bool retrigger = engine->params[kLfoRetrigger] != 0.0f;
+            for (uint32_t voiceIndex = 0; voiceIndex < engine->voiceLimit; ++voiceIndex) {
+                synth::Voice* voice = &engine->voices[voiceIndex];
+                if (voice->active == 0) continue;
+                (void)advance_envelope(engine, voice);
+                if (voice->active == 0) continue;
+                (void)advance_filter_envelope(engine, voice);
+            }
+            modulatedLfoRate = modulation_lfo_rate(engine, lfoShape, globalLfo);
+            for (uint32_t voiceIndex = 0; voiceIndex < engine->voiceLimit; ++voiceIndex) {
+                synth::Voice* voice = &engine->voices[voiceIndex];
+                if (voice->active == 0) continue;
+                const float voiceLfo = retrigger
+                    ? lfo_value(lfoShape, voice->lfoPhase, voice->lfoHold) : globalLfo;
+                ModulationValues modulation{};
+                evaluate_modulation(engine, voice, voiceLfo, &modulation);
+                render_m1c_voice(engine, voice, voiceLfo, modulation, &left, &right);
+                if (retrigger) {
+                    advance_lfo_at_rate(&voice->lfoPhase, &voice->lfoCycleIndex,
+                        &voice->lfoHold, engine, voiceIndex, modulatedLfoRate);
+                }
+            }
+        } else if (m1b_bypassed(engine)) {
             for (uint32_t voiceIndex = 0; voiceIndex < engine->voiceLimit; ++voiceIndex) {
                 synth::Voice* voice = &engine->voices[voiceIndex];
                 if (voice->active == 0) continue;
@@ -877,8 +1149,13 @@ extern "C" int synth_process(SynthEngine* engine, const SynthEvent* events, uint
         right *= engine->params[kMasterGain];
         outL[frame] = left;
         outR[frame] = right;
-        advance_lfo(&engine->globalLfoPhase, &engine->globalLfoCycleIndex,
-            &engine->globalLfoHold, engine, kGlobalLfoIndex);
+        if (matrixActive) {
+            advance_lfo_at_rate(&engine->globalLfoPhase, &engine->globalLfoCycleIndex,
+                &engine->globalLfoHold, engine, kGlobalLfoIndex, modulatedLfoRate);
+        } else {
+            advance_lfo(&engine->globalLfoPhase, &engine->globalLfoCycleIndex,
+                &engine->globalLfoHold, engine, kGlobalLfoIndex);
+        }
     }
     return ignored;
 }
@@ -889,4 +1166,4 @@ extern "C" uint32_t synth_get_tail_frames(const SynthEngine* engine) {
     return frames <= 0.0 ? 0u : static_cast<uint32_t>(frames + 0.999999);
 }
 
-extern "C" uint32_t synth_engine_version(void) { return 5; }
+extern "C" uint32_t synth_engine_version(void) { return 6; }

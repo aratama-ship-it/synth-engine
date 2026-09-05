@@ -31,13 +31,13 @@ JUCE も AGPL か商用ライセンスの二択です。**ライセンスの都�
 
 | | 状態 |
 |---|---|
-| DSPコア | 2オペのウェーブテーブル OSC、ユニゾン最大4声、B→A の位相変調（FM）、サブ、white/pink ノイズ、波形モーフ、TPT/ZDF SVF、ディケイ／リリースのカーブを選べるアンプ／フィルタEG、6波形LFO |
+| DSPコア | 2オペのウェーブテーブル OSC、ユニゾン最大4声、B→A の位相変調（FM）、サブ、white/pink ノイズ、波形モーフ、TPT/ZDF SVF、ディケイ／リリースのカーブを選べるアンプ／フィルタEG、6波形LFO、6スロットのモジュレーションマトリクス、マクロ2本 |
 | AUv3 プラグイン | `auval` 警告0で通過。パラメータ、状態保存、ファクトリープリセット |
 | スタンドアロン | 起動して A〜Z キーで演奏できる |
 | ブラウザ | AudioWorklet でライブ演奏、OfflineAudioContext でオフライン書き出し |
 | フィルタ | 12/24 dB の SVF（LP/BP/HP/Notch）、キートラック、専用エンベロープ |
-| LFO | 6波形、フリーラン／ノートで頭出し、カットオフ・ピッチ・音量へ直結 |
-| モジュレーションマトリクス | **まだありません**（次の段階）。AU と Web から触れるのも当面パラメータ 0〜8 のみ |
+| LFO | 6波形、フリーラン／ノートで頭出し、カットオフ・ピッチ・音量への直結とマトリクス入力 |
+| モジュレーションマトリクス | 7信号源 × 13送り先、6スロット固定。マクロ2本はパラメータ／`SYNTH_EV_MACRO` から5 ms平滑化つきで操作可能 |
 
 ## 実測値（Apple M4 Pro / macOS 26.5.2）
 
@@ -49,20 +49,20 @@ JUCE も AGPL か商用ライセンスの二択です。**ライセンスの都�
 | **wasm と native の差** | 最大 −133〜135 dBFS ／ RMS −160〜164 dBFS（同じ3プリセットで確認。float32 の丸め程度） |
 | ブロックサイズ不変性 | block 1／7／64／128／511 でビット一致 |
 | サンプルレート | 44.1／48／96 kHz すべてで NaN・Inf ゼロ |
-| 処理時間 | LP24・LFO・16音 × ユニゾン4で平均 167 µs・p99 216 µs（48 kHz / 128 frames、期限の50%は1333.5 µs） |
+| 処理時間 | 6スロット・LP24・LFO・16音 × ユニゾン4で平均 234.76 µs・p99 265.88 µs（48 kHz / 128 frames、期限の50%は1333.5 µs） |
 | エイリアス | ノコギリ波 C8 で −96.2 dB、FM 全開で −94.3 dB |
 | フィルタ | −3 dB点の最大誤差 0.342%、LP12 −11.94 dB/oct、LP24 −23.88 dB/oct、resonance 0.8 のピーク差 +13.82 dB、キートラック 1oct で 2.003 倍 |
 | 共振の実挙動 | resonance 1（Q=100）でカットオフ周波数にリンギングし 136 dB/秒 で減衰。**理論値と一致**（持続的な自己発振はしない） |
 | LFO | 6波形とも周期誤差 0%、S&H再レンダーはビット一致。設定 5 Hz で明るさが実測 毎秒 5.0 回変化 |
-| wasm サイズ | 28,452 バイト（gzip 9,198 バイト・import 0） |
-| 自動テスト | 41項目すべて PASS |
+| wasm サイズ | 43,871 バイト（gzip 13,433 バイト） |
+| 自動テスト | 48項目すべて PASS |
 
 ## 動かす
 
 必要なもの: Xcode（clang / swiftc）、GNU make、Node.js。WASM を作るなら `brew install llvm lld`。
 
 ```bash
-make test                 # コアの自動テスト41項目
+make test                 # コアの自動テスト48項目
 make cli                  # オフラインレンダラー
 ./build/render-cli --preset presets/m1_unison_saw.txt --events fixtures/m0_events_chord.txt \
     --out build/out.wav --sr 48000 --block 128 --frames 96000
@@ -72,6 +72,9 @@ make cli                  # オフラインレンダラー
 
 ./build/render-cli --preset presets/m1b_sweep_linear.txt --events fixtures/m0_events_chord.txt \
     --out build/m1b_sweep_linear.wav --sr 48000 --block 128 --frames 96000
+
+./build/render-cli --preset presets/m1c_macro_morph.txt --events fixtures/m0_events_chord.txt \
+    --out build/m1c_macro_morph.wav --sr 48000 --block 128 --frames 96000
 
 make wasm WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang   # build/synth_engine.wasm
 
@@ -99,9 +102,7 @@ fixtures/     イベント列（絶対フレーム位置つき）
 
 ## この先
 
-1. AU/Webへフィルタ・EG2・LFOのパラメータを公開
-2. モジュレーションマトリクスとマクロ
-3. 別プロジェクト [random-scale-keys](https://github.com/aratama-ship-it/random-scale-keys) の音源をこのシンセに差し替える
+1. 別プロジェクト [random-scale-keys](https://github.com/aratama-ship-it/random-scale-keys) の音源をこのシンセに差し替える
 
 ## 開発中に踏んだ落とし穴（macOS で AUv3 を自作する人へ）
 
