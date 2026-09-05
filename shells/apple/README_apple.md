@@ -64,14 +64,49 @@ Core MIDI入力ソースが存在する場合は起動時に全ソースへ接�
 log stream --style compact --predicate 'process == "SynthEngineApp"'
 ```
 
-## Logic Pro 12.3での確認（本人確認）
+## Logic Pro で使う
 
-1. Logic Proを終了した状態でbuild.shとauvalを完了する。
-2. Logic Pro 12.3を起動し、ソフトウェア音源トラックを作る。
-3. Instrumentスロットから `AU Instruments > ARATA URAWA > SynthEngine` を選ぶ。
-4. MIDIノートを入力して発音を確認する。
-5. Smart Controlsまたはホストのパラメータ一覧でparamId 1〜8を変更する。
-6. プロジェクトを保存してLogic Proを終了し、再度開いて値が復元されることを確認する。
+### 1. 入れる（ターミナルで1回だけ）
+
+```bash
+cd "<このリポジトリ>"
+bash shells/apple/build.sh          # ビルドと署名。Apple Development 証明書を自動で探す
+auval -v aumu Sken Arat             # 「AU VALIDATION SUCCEEDED.」が出れば準備完了
+```
+
+`build.sh` の最後で `pluginkit -a` を実行して拡張を登録している。**Logic は起動中だと新しい AU を拾わないので、
+入れ直したら Logic を再起動する。**
+
+### 2. Logic で鳴らす
+
+1. Logic Pro を起動し、**ソフトウェア音源トラック**を作る。
+2. 音源スロットをクリック →`AU 音源` → **`ARATA URAWA` → `SynthEngine`** → `ステレオ`。
+3. 鍵盤（画面上のミュージックタイピング `⌘K` でも可）で音が出ることを確認する。
+4. プラグイン画面右上の**プリセット欄**から選ぶ。4つ入っている:
+   - **Init** — 素の状態
+   - **Saw Lead** — ノコギリ波のリード
+   - **Filter Sweep** — フィルタEGのスイープ（試聴ページで確認したもの）
+   - **Wobble** — LFO でカットオフを揺らす
+5. パラメータは**55個すべて**が Logic 側に出る。ノブが無い汎用UIなので、
+   プラグイン画面の**「コントロール」表示**か、トラックの **Smart Controls** から数値で触る。
+   よく使うのは `filterCutoff`(37)・`filterResonance`(38)・`filterEnvAmount`(40)・`filterEgDecay`(42)・
+   `filterEgCurve`(54)・`lfoRate`(46)・`lfoToCutoff`(49)。
+
+### 3. 確認したいこと
+
+- 音が出る／ノイズや途切れがない
+- プリセットを切り替えると音が変わる
+- パラメータを動かすと音が変わる（特に `filterCutoff`）
+- **プロジェクトを保存 → Logic を終了 → もう一度開く → 値が復元される**
+- オートメーションが書ける（任意）
+
+### 既知の違い
+
+- **AU（MIDI経由）とオフラインレンダラー（イベントログ経由）で、音がわずかに違う場合がある。**
+  ベロシティが MIDI の7bit（0〜127）に丸められるためと、オシレーターの初期位相を決めるハッシュに
+  ノートIDを使っており、MIDI 1.0 にはノートIDが無いため AU 側は「チャンネル×128＋ノート番号」で代用しているため。
+  M0a 相当のプリセット（フィルタ・ユニゾン等を使わないもの）ではビット一致する。
+  **音楽的な性格は同じだが、波形は完全一致しない。**
 
 ## アンインストール
 
