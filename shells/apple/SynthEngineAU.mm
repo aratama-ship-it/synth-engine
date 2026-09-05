@@ -8,13 +8,10 @@
 #include <cstring>
 
 #include "synth_engine.h"
+#include "generated_presets.h"
 
 namespace {
 
-constexpr AUParameterAddress kFirstParameter = 0;
-constexpr AUParameterAddress kLastParameter = 8;
-constexpr uint32_t kParameterCount = 9;
-constexpr uint32_t kAllParametersDirty = (1u << kParameterCount) - 1u;
 constexpr uint32_t kMaximumEvents = 2048;
 
 struct DeferredEvent {
@@ -23,6 +20,16 @@ struct DeferredEvent {
 };
 
 struct RenderContext {
+    explicit RenderContext(uint32_t count)
+        : parameterCount(count),
+          parameterValues(new std::atomic<float>[count]),
+          dirtyParameters(new std::atomic<bool>[count]) {}
+
+    ~RenderContext() {
+        delete[] dirtyParameters;
+        delete[] parameterValues;
+    }
+
     SynthEngine* engine = nullptr;
     void* engineMemory = nullptr;
     float* left = nullptr;
@@ -30,44 +37,42 @@ struct RenderContext {
     float* interleaved = nullptr;
     AUAudioFrameCount maximumFrames = 0;
     uint32_t outputChannels = 2;
-    std::atomic<float> parameterValues[kParameterCount];
-    std::atomic<uint32_t> dirtyParameters{0};
+    uint32_t parameterCount;
+    std::atomic<float>* parameterValues;
+    std::atomic<bool>* dirtyParameters;
     std::atomic<uint32_t> droppedEvents{0};
     SynthEvent blockEvents[kMaximumEvents];
     DeferredEvent deferredEvents[kMaximumEvents];
     uint32_t deferredEventCount = 0;
 };
 
-struct ParameterDefinition {
-    AUParameterAddress address;
-    __unsafe_unretained NSString* identifier;
-    __unsafe_unretained NSString* name;
-    AUValue minimum;
-    AUValue maximum;
-    AUValue defaultValue;
-    AudioUnitParameterUnit unit;
-};
+AudioUnitParameterUnit parameterUnit(uint32_t flags) {
+    if ((flags & SYNTH_PARAM_FLAG_INTEGER) != 0u) return kAudioUnitParameterUnit_Indexed;
+    if ((flags & SYNTH_PARAM_FLAG_SECONDS) != 0u) return kAudioUnitParameterUnit_Seconds;
+    if ((flags & SYNTH_PARAM_FLAG_HERTZ) != 0u) return kAudioUnitParameterUnit_Hertz;
+    if ((flags & SYNTH_PARAM_FLAG_CENTS) != 0u) return kAudioUnitParameterUnit_Cents;
+    if ((flags & SYNTH_PARAM_FLAG_SEMITONES) != 0u)
+        return kAudioUnitParameterUnit_RelativeSemiTones;
+    if ((flags & SYNTH_PARAM_FLAG_OCTAVES) != 0u) return kAudioUnitParameterUnit_Octaves;
+    if ((flags & SYNTH_PARAM_FLAG_GAIN) != 0u) return kAudioUnitParameterUnit_LinearGain;
+    return kAudioUnitParameterUnit_Generic;
+}
 
-const ParameterDefinition kParameterDefinitions[] = {
-    {0, @"oscAWavetable", @"Osc A Wavetable", 0.0f, 3.0f, 0.0f, kAudioUnitParameterUnit_Indexed},
-    {1, @"oscAMorph", @"Osc A Morph", 0.0f, 1.0f, 0.0f, kAudioUnitParameterUnit_Generic},
-    {2, @"oscALevel", @"Osc A Level", 0.0f, 4.0f, 0.8f, kAudioUnitParameterUnit_LinearGain},
-    {3, @"ampAttack", @"Amp Attack", 0.0f, 60.0f, 0.005f, kAudioUnitParameterUnit_Seconds},
-    {4, @"ampDecay", @"Amp Decay", 0.0f, 60.0f, 0.1f, kAudioUnitParameterUnit_Seconds},
-    {5, @"ampSustain", @"Amp Sustain", 0.0f, 1.0f, 0.8f, kAudioUnitParameterUnit_Generic},
-    {6, @"ampRelease", @"Amp Release", 0.0f, 60.0f, 0.2f, kAudioUnitParameterUnit_Seconds},
-    {7, @"masterGain", @"Master Gain", 0.0f, 4.0f, 0.2f, kAudioUnitParameterUnit_LinearGain},
-    {8, @"voiceCountMax", @"Voice Count Max", 1.0f, 16.0f, 16.0f, kAudioUnitParameterUnit_Indexed},
-};
+AUValue normalizedParameterValue(const SynthParamInfo& parameter, AUValue value) {
+    if (value < parameter.minimum) value = parameter.minimum;
+    if (value > parameter.maximum) value = parameter.maximum;
+    if ((parameter.flags & SYNTH_PARAM_FLAG_INTEGER) != 0u) {
+        const int32_t rounded = value >= 0.0f ? static_cast<int32_t>(value + 0.5f)
+                                              : static_cast<int32_t>(value - 0.5f);
+        value = static_cast<AUValue>(rounded);
+    }
+    return value;
+}
 
-const AUValue kSinePadValues[] = {
-    0.0f, 0.0f, 0.8f, 0.8f, 2.0f, 0.7f, 1.5f, 0.2f, 16.0f};
-const AUValue kSawLeadValues[] = {
-    1.0f, 0.0f, 0.8f, 0.003f, 0.15f, 0.6f, 0.15f, 0.2f, 16.0f};
-
-static_assert(sizeof(kParameterDefinitions) / sizeof(kParameterDefinitions[0]) == kParameterCount);
-static_assert(sizeof(kSinePadValues) / sizeof(kSinePadValues[0]) == kParameterCount);
-static_assert(sizeof(kSawLeadValues) / sizeof(kSawLeadValues[0]) == kParameterCount);
+void markAllParametersDirty(RenderContext* context) {
+    for (uint32_t address = 0; address < context->parameterCount; ++address)
+        context->dirtyParameters[address].store(true, std::memory_order_relaxed);
+}
 
 void clearOutput(AudioBufferList* outputData, AUAudioFrameCount frameCount) {
     if (outputData == nullptr) return;
@@ -132,9 +137,8 @@ uint64_t eventOffset(const AURenderEvent* event, const AudioTimeStamp* timestamp
 }
 
 void applyPendingParameters(RenderContext* context) {
-    const uint32_t dirty = context->dirtyParameters.exchange(0, std::memory_order_acquire);
-    for (uint32_t address = kFirstParameter; address <= kLastParameter; ++address) {
-        if ((dirty & (1u << address)) != 0u) {
+    for (uint32_t address = 0; address < context->parameterCount; ++address) {
+        if (context->dirtyParameters[address].exchange(false, std::memory_order_acquire)) {
             (void)synth_set_param(
                 context->engine, address,
                 context->parameterValues[address].load(std::memory_order_relaxed));
@@ -179,7 +183,7 @@ AUAudioUnitStatus render(RenderContext* context, AudioUnitRenderActionFlags* act
         } else if (current->head.eventType == AURenderEventParameter ||
                    current->head.eventType == AURenderEventParameterRamp) {
             const AUParameterAddress address = current->parameter.parameterAddress;
-            if (address >= kFirstParameter && address <= kLastParameter) {
+            if (address < context->parameterCount) {
                 event.kind = SYNTH_EV_PARAM;
                 event.id = static_cast<uint32_t>(address);
                 event.a = current->parameter.value;
@@ -257,12 +261,22 @@ NSError* makeError(NSInteger code, NSString* description) {
     self = [super initWithComponentDescription:componentDescription options:options error:outError];
     if (self == nil) return nil;
 
-    _renderContext = new RenderContext();
-    for (const ParameterDefinition& definition : kParameterDefinitions) {
-        _renderContext->parameterValues[definition.address].store(definition.defaultValue,
-                                                                  std::memory_order_relaxed);
+    const uint32_t parameterCount = synth_param_count();
+    if (parameterCount == 0) {
+        if (outError != nullptr) *outError = makeError(4, @"SynthEngine has no parameters.");
+        return nil;
     }
-    _renderContext->dirtyParameters.store(kAllParametersDirty, std::memory_order_relaxed);
+    _renderContext = new RenderContext(parameterCount);
+    for (uint32_t address = 0; address < parameterCount; ++address) {
+        SynthParamInfo definition{};
+        if (synth_param_info(address, &definition) != 0) {
+            if (outError != nullptr) *outError = makeError(5, @"Unable to read SynthEngine parameters.");
+            return nil;
+        }
+        _renderContext->parameterValues[address].store(definition.defaultValue,
+                                                       std::memory_order_relaxed);
+        _renderContext->dirtyParameters[address].store(true, std::memory_order_relaxed);
+    }
 
     AVAudioFormat* format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:44100.0
                                                                            channels:2];
@@ -276,17 +290,19 @@ NSError* makeError(NSInteger code, NSString* description) {
     self.maximumFramesToRender = 4096;
 
     NSMutableArray<AUParameter*>* parameters = [NSMutableArray array];
-    for (const ParameterDefinition& definition : kParameterDefinitions) {
+    for (uint32_t address = 0; address < parameterCount; ++address) {
+        SynthParamInfo definition{};
+        if (synth_param_info(address, &definition) != 0) return nil;
         AudioUnitParameterOptions flags = kAudioUnitParameterFlag_IsReadable |
                                           kAudioUnitParameterFlag_IsWritable;
-        if (definition.address == 8) flags |= kAudioUnitParameterFlag_ValuesHaveStrings;
+        if (definition.id == 8) flags |= kAudioUnitParameterFlag_ValuesHaveStrings;
         AUParameter* parameter = [AUParameterTree
-            createParameterWithIdentifier:definition.identifier
-                                      name:definition.name
-                                   address:definition.address
+            createParameterWithIdentifier:[NSString stringWithUTF8String:definition.identifier]
+                                      name:[NSString stringWithUTF8String:definition.displayName]
+                                   address:definition.id
                                        min:definition.minimum
                                        max:definition.maximum
-                                      unit:definition.unit
+                                      unit:parameterUnit(definition.flags)
                                   unitName:nil
                                      flags:flags
                               valueStrings:nil
@@ -298,29 +314,27 @@ NSError* makeError(NSInteger code, NSString* description) {
     RenderContext* context = _renderContext;
     tree.implementorValueObserver = ^(AUParameter* parameter, AUValue value) {
         const AUParameterAddress address = parameter.address;
-        if (address >= kFirstParameter && address <= kLastParameter) {
+        if (address < context->parameterCount) {
             context->parameterValues[address].store(value, std::memory_order_relaxed);
-            context->dirtyParameters.fetch_or(1u << address, std::memory_order_release);
+            context->dirtyParameters[address].store(true, std::memory_order_release);
         }
     };
     tree.implementorValueProvider = ^AUValue(AUParameter* parameter) {
         const AUParameterAddress address = parameter.address;
-        if (address < kFirstParameter || address > kLastParameter) return 0.0f;
+        if (address >= context->parameterCount) return 0.0f;
         return context->parameterValues[address].load(std::memory_order_relaxed);
     };
     self.parameterTree = tree;
 
-    AUAudioUnitPreset* initPreset = [[AUAudioUnitPreset alloc] init];
-    initPreset.number = 0;
-    initPreset.name = @"Init";
-    AUAudioUnitPreset* sinePadPreset = [[AUAudioUnitPreset alloc] init];
-    sinePadPreset.number = 1;
-    sinePadPreset.name = @"Sine Pad";
-    AUAudioUnitPreset* sawLeadPreset = [[AUAudioUnitPreset alloc] init];
-    sawLeadPreset.number = 2;
-    sawLeadPreset.name = @"Saw Lead";
-    _factoryPresets = @[initPreset, sinePadPreset, sawLeadPreset];
-    _currentPreset = initPreset;
+    NSMutableArray<AUAudioUnitPreset*>* factoryPresets = [NSMutableArray array];
+    for (uint32_t index = 0; index < kGeneratedPresetCount; ++index) {
+        AUAudioUnitPreset* preset = [[AUAudioUnitPreset alloc] init];
+        preset.number = static_cast<NSInteger>(index);
+        preset.name = [NSString stringWithUTF8String:kGeneratedPresets[index].name];
+        [factoryPresets addObject:preset];
+    }
+    _factoryPresets = [factoryPresets copy];
+    _currentPreset = _factoryPresets.firstObject;
     return self;
 }
 
@@ -351,20 +365,25 @@ NSError* makeError(NSInteger code, NSString* description) {
         return;
     }
 
-    const AUValue* values = nullptr;
-    if (preset.number == 1) values = kSinePadValues;
-    else if (preset.number == 2) values = kSawLeadValues;
-    else if (preset.number != 0) return;
-
-    NSUInteger index = 0;
-    for (const ParameterDefinition& definition : kParameterDefinitions) {
-        const AUValue value = values == nullptr ? definition.defaultValue : values[index];
-        _renderContext->parameterValues[definition.address].store(value,
-                                                                  std::memory_order_relaxed);
-        _renderContext->dirtyParameters.fetch_or(1u << definition.address,
-                                                  std::memory_order_release);
-        self.parameterTree.allParameters[index].value = value;
-        ++index;
+    if (preset.number >= static_cast<NSInteger>(kGeneratedPresetCount)) return;
+    for (uint32_t address = 0; address < _renderContext->parameterCount; ++address) {
+        SynthParamInfo definition{};
+        if (synth_param_info(address, &definition) != 0) return;
+        _renderContext->parameterValues[address].store(definition.defaultValue,
+                                                       std::memory_order_relaxed);
+        _renderContext->dirtyParameters[address].store(true, std::memory_order_release);
+        self.parameterTree.allParameters[address].value = definition.defaultValue;
+    }
+    const SynthGeneratedPresetDefinition& generated = kGeneratedPresets[preset.number];
+    for (uint32_t index = 0; index < generated.valueCount; ++index) {
+        const SynthGeneratedPresetValue& setting = generated.values[index];
+        if (setting.id >= _renderContext->parameterCount) continue;
+        SynthParamInfo definition{};
+        if (synth_param_info(setting.id, &definition) != 0) continue;
+        const AUValue value = normalizedParameterValue(definition, setting.value);
+        _renderContext->parameterValues[setting.id].store(value, std::memory_order_relaxed);
+        _renderContext->dirtyParameters[setting.id].store(true, std::memory_order_release);
+        self.parameterTree.allParameters[setting.id].value = value;
     }
     _currentPreset = _factoryPresets[static_cast<NSUInteger>(preset.number)];
 }
@@ -412,7 +431,7 @@ NSError* makeError(NSInteger code, NSString* description) {
         return NO;
     }
     context->deferredEventCount = 0;
-    context->dirtyParameters.store(kAllParametersDirty, std::memory_order_release);
+    markAllParametersDirty(context);
     applyPendingParameters(context);
     return YES;
 }
@@ -458,14 +477,17 @@ NSError* makeError(NSInteger code, NSString* description) {
 
 - (NSDictionary<NSString*, id>*)fullState {
     NSMutableDictionary<NSString*, NSNumber*>* parameters = [NSMutableDictionary dictionary];
-    for (const ParameterDefinition& definition : kParameterDefinitions) {
-        parameters[definition.identifier] = @(
-            _renderContext->parameterValues[definition.address].load(std::memory_order_relaxed));
+    for (uint32_t address = 0; address < _renderContext->parameterCount; ++address) {
+        SynthParamInfo definition{};
+        if (synth_param_info(address, &definition) != 0) continue;
+        NSString* identifier = [NSString stringWithUTF8String:definition.identifier];
+        parameters[identifier] = @(
+            _renderContext->parameterValues[address].load(std::memory_order_relaxed));
     }
     // auval「Class Data does not have required field:<type> == componentType」対策（2026-09-04 実測。Claude 修正）:
     // AUv3 の fullState は super の辞書（type/subtype/manufacturer/version 等の必須キー）を土台にして自前のキーを足す。
     NSMutableDictionary<NSString*, id>* state = [([super fullState] ?: @{}) mutableCopy];
-    state[@"stateVersion"] = @1;
+    state[@"stateVersion"] = @2;
     state[@"parameters"] = parameters;
     return state;
 }
@@ -475,17 +497,19 @@ NSError* makeError(NSInteger code, NSString* description) {
     NSDictionary* parameters = [state[@"parameters"] isKindOfClass:[NSDictionary class]]
         ? state[@"parameters"] : nil;
     if (parameters == nil) return;
-    for (const ParameterDefinition& definition : kParameterDefinitions) {
-        NSNumber* number = [parameters[definition.identifier] isKindOfClass:[NSNumber class]]
-            ? parameters[definition.identifier] : nil;
+    for (uint32_t address = 0; address < _renderContext->parameterCount; ++address) {
+        SynthParamInfo definition{};
+        if (synth_param_info(address, &definition) != 0) continue;
+        NSString* identifier = [NSString stringWithUTF8String:definition.identifier];
+        NSString* legacyIdentifier = [NSString stringWithFormat:@"%u", address];
+        id storedValue = parameters[identifier];
+        if (![storedValue isKindOfClass:[NSNumber class]]) storedValue = parameters[legacyIdentifier];
+        NSNumber* number = [storedValue isKindOfClass:[NSNumber class]] ? storedValue : nil;
         if (number == nil) continue;
-        AUValue value = number.floatValue;
-        if (value < definition.minimum) value = definition.minimum;
-        if (value > definition.maximum) value = definition.maximum;
-        _renderContext->parameterValues[definition.address].store(value, std::memory_order_relaxed);
-        _renderContext->dirtyParameters.fetch_or(1u << definition.address,
-                                                  std::memory_order_release);
-        self.parameterTree.allParameters[definition.address - kFirstParameter].value = value;
+        const AUValue value = normalizedParameterValue(definition, number.floatValue);
+        _renderContext->parameterValues[address].store(value, std::memory_order_relaxed);
+        _renderContext->dirtyParameters[address].store(true, std::memory_order_release);
+        self.parameterTree.allParameters[address].value = value;
     }
 }
 

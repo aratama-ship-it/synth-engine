@@ -1,4 +1,4 @@
-import { createSynthNode, parsePreset } from "./synth-node.js";
+import { createSynthNode, getParams, parsePreset } from "./synth-node.js";
 
 const paths = {
   wasm: "../../build/synth_engine.wasm",
@@ -8,6 +8,7 @@ const paths = {
 };
 const sampleRate = 48000;
 const durationSeconds = 10;
+const commonParameterIds = new Set([1, 2, 3, 4, 5, 6, 7, 37, 38, 40, 46, 49]);
 const elements = Object.fromEntries(
   [...document.querySelectorAll("[id]")].map((element) => [element.id, element]),
 );
@@ -16,6 +17,8 @@ let wasmBytes;
 let liveContext;
 let liveSynth;
 const heldKeys = new Set();
+const parameterValues = new Map();
+const touchedParameters = new Set();
 
 function setStatus(message, isError = false) {
   elements.status.textContent = message;
@@ -28,6 +31,62 @@ function formatBytes(value) {
 
 function dbfs(value) {
   return value > 0 ? `${(20 * Math.log10(value)).toFixed(2)} dBFS` : "−∞ dBFS";
+}
+
+function parameterStep(parameter) {
+  if ((parameter.flags & 1) !== 0) return "1";
+  const range = parameter.max - parameter.min;
+  if (range <= 2) return "0.001";
+  if (range <= 100) return "0.01";
+  return "1";
+}
+
+function formatParameterValue(value) {
+  return Number(value.toPrecision(7)).toString();
+}
+
+function renderParameterList(params) {
+  elements["parameter-count"].textContent = `${params.length} items`;
+  elements["parameter-list"].replaceChildren();
+  for (const parameter of params) {
+    parameterValues.set(parameter.id, parameter.default);
+    const row = document.createElement("div");
+    row.className = "parameter-row";
+
+    const label = document.createElement("div");
+    label.className = "parameter-name";
+    label.innerHTML = `<span class="parameter-id">#${parameter.id}</span><strong></strong><code class="parameter-key"></code><span class="parameter-range"></span>`;
+    label.querySelector("strong").textContent = parameter.displayName;
+    label.querySelector("code").textContent = parameter.identifier;
+    label.querySelector(".parameter-range").textContent = `${formatParameterValue(parameter.min)}..${formatParameterValue(parameter.max)}`;
+    row.append(label);
+
+    const control = document.createElement("div");
+    control.className = "parameter-control";
+    const value = document.createElement("output");
+    value.className = "parameter-value";
+    value.textContent = formatParameterValue(parameter.default);
+    if (commonParameterIds.has(parameter.id)) {
+      const slider = document.createElement("input");
+      slider.type = "range";
+      slider.min = String(parameter.min);
+      slider.max = String(parameter.max);
+      slider.step = parameterStep(parameter);
+      slider.value = String(parameter.default);
+      slider.setAttribute("aria-label", parameter.displayName);
+      slider.addEventListener("input", () => {
+        const nextValue = Number(slider.value);
+        parameterValues.set(parameter.id, nextValue);
+        touchedParameters.add(parameter.id);
+        value.textContent = formatParameterValue(nextValue);
+        liveSynth?.setParam(parameter.id, nextValue);
+      });
+      control.append(slider);
+    }
+    control.append(value);
+    row.append(control);
+    elements["parameter-list"].append(row);
+  }
 }
 
 async function fetchChecked(url, type = "arrayBuffer") {
@@ -84,6 +143,7 @@ async function startLive() {
     observeWorklet(liveSynth);
     liveSynth.connect(liveContext.destination);
     liveSynth.loadPreset(await fetchChecked(paths.preset, "text"));
+    for (const id of touchedParameters) liveSynth.setParam(id, parameterValues.get(id));
     await liveContext.resume();
     setStatus(`開始しました（${liveContext.sampleRate.toLocaleString()} Hz）。A〜Z キーで発音できます。`);
   } catch (error) {
@@ -263,6 +323,7 @@ elements["render-button"].disabled = true;
 
 try {
   wasmBytes = await fetchChecked(paths.wasm);
+  renderParameterList(await getParams(wasmBytes));
   elements["wasm-raw"].textContent = formatBytes(wasmBytes.byteLength);
   const compressed = await gzipSize(wasmBytes);
   elements["wasm-gzip"].textContent = compressed === null ? "未対応" : formatBytes(compressed);

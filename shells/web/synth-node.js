@@ -1,4 +1,60 @@
 const loadedContexts = new WeakSet();
+const PARAM_INFO_BYTES = 28;
+
+function exportedNumber(value, name) {
+  const number = Number(value instanceof WebAssembly.Global ? value.value : value);
+  if (!Number.isSafeInteger(number) || number < 0) throw new Error(`wasm export '${name}' is invalid`);
+  return number;
+}
+
+function readCString(memory, pointer) {
+  const bytes = new Uint8Array(memory.buffer);
+  if (!Number.isInteger(pointer) || pointer <= 0 || pointer >= bytes.length) {
+    throw new Error(`invalid wasm string pointer: ${pointer}`);
+  }
+  let end = pointer;
+  while (end < bytes.length && bytes[end] !== 0) end += 1;
+  if (end === bytes.length) throw new Error(`unterminated wasm string at ${pointer}`);
+  return new TextDecoder().decode(bytes.subarray(pointer, end));
+}
+
+function decodeParams(exports) {
+  const memory = exports?.memory;
+  if (!(memory instanceof WebAssembly.Memory)) throw new Error("wasm export 'memory' is missing");
+  if (typeof exports.synth_param_count !== "function" || typeof exports.synth_param_info !== "function") {
+    throw new Error("wasm parameter metadata exports are missing");
+  }
+  const count = exportedNumber(exports.synth_param_count(), "synth_param_count");
+  const heapBase = exportedNumber(exports.__heap_base, "__heap_base");
+  const pointer = (heapBase + 3) & ~3;
+  const requiredBytes = pointer + PARAM_INFO_BYTES;
+  if (requiredBytes > memory.buffer.byteLength) {
+    memory.grow(Math.ceil((requiredBytes - memory.buffer.byteLength) / 65536));
+  }
+  const data = new DataView(memory.buffer);
+  const params = [];
+  for (let id = 0; id < count; id += 1) {
+    if (exports.synth_param_info(id, pointer) !== 0) {
+      throw new Error(`synth_param_info failed for id ${id}`);
+    }
+    params.push({
+      id: data.getUint32(pointer, true),
+      identifier: readCString(memory, data.getUint32(pointer + 4, true)),
+      displayName: readCString(memory, data.getUint32(pointer + 8, true)),
+      min: data.getFloat32(pointer + 12, true),
+      max: data.getFloat32(pointer + 16, true),
+      default: data.getFloat32(pointer + 20, true),
+      flags: data.getUint32(pointer + 24, true),
+    });
+  }
+  return params;
+}
+
+export async function getParams(wasmBytes) {
+  if (!(wasmBytes instanceof ArrayBuffer)) throw new TypeError("wasmBytes must be an ArrayBuffer");
+  const result = await WebAssembly.instantiate(wasmBytes, {});
+  return decodeParams(result.instance.exports);
+}
 
 export function parsePreset(text) {
   if (typeof text !== "string") throw new TypeError("preset text must be a string");
@@ -27,6 +83,7 @@ export async function createSynthNode(context, wasmBytes) {
     throw new TypeError("context must provide audioWorklet.addModule");
   }
   if (!(wasmBytes instanceof ArrayBuffer)) throw new TypeError("wasmBytes must be an ArrayBuffer");
+  const params = await getParams(wasmBytes);
   if (!loadedContexts.has(context)) {
     await context.audioWorklet.addModule(new URL("./synth-worklet.js", import.meta.url));
     loadedContexts.add(context);
@@ -80,6 +137,9 @@ export async function createSynthNode(context, wasmBytes) {
     },
     setParam(id, value) {
       audioNode.port.postMessage({ type: "preset", params: [[id, value]] });
+    },
+    getParams() {
+      return params.map((parameter) => ({ ...parameter }));
     },
     loadPreset(text) {
       const params = parsePreset(text);

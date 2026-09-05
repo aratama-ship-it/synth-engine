@@ -86,6 +86,22 @@
     .keyboard { grid-column: 1 / -1; }
     .keys { margin-top: var(--space-2); color: var(--color-accent); overflow-wrap: anywhere; }
     .fine { margin-top: var(--space-3); color: var(--color-sub); font-size: var(--fs-small); }
+    .parameters { grid-column: 1 / -1; }
+    summary { cursor: pointer; font-weight: 700; letter-spacing: 0.04em; }
+    .parameter-list { margin-top: var(--space-3); border-top: 1px solid var(--color-line); }
+    .parameter-row {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(240px, 1fr);
+      gap: var(--space-3);
+      align-items: center;
+      padding-block: var(--space-2);
+      border-bottom: 1px solid var(--color-line);
+    }
+    .parameter-name { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline; }
+    .parameter-id, .parameter-key, .parameter-range { color: var(--color-sub); font-size: var(--fs-small); }
+    .parameter-control { display: grid; grid-template-columns: minmax(120px, 1fr) auto; gap: var(--space-2); align-items: center; }
+    .parameter-control input { width: 100%; accent-color: var(--color-accent); }
+    .parameter-value { min-width: 72px; text-align: right; font-variant-numeric: tabular-nums; }
     @media (max-width: 680px) {
       h1 { font-size: 24px; }
       .grid { grid-template-columns: 1fr; }
@@ -93,6 +109,7 @@
       section { padding: var(--space-3); }
       dl { grid-template-columns: 1fr; }
       dd { text-align: left; margin-bottom: var(--space-2); }
+      .parameter-row { grid-template-columns: 1fr; gap: var(--space-1); }
     }
   </style>
 </head>
@@ -151,6 +168,13 @@
           <dt>p99</dt><dd id="process-p99">—</dd>
           <dt>samples</dt><dd id="process-blocks">—</dd>
         </dl>
+      </section>
+
+      <section class="parameters">
+        <details>
+          <summary>PARAMETERS / <span id="parameter-count">—</span></summary>
+          <div id="parameter-list" class="parameter-list"></div>
+        </details>
       </section>
     </div>
   </main>

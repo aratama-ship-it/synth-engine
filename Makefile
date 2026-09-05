@@ -25,7 +25,7 @@ build/libsynth_engine.a: $(CORE_OBJECTS)
 	@mkdir -p build
 	ar rcs $@ $(CORE_OBJECTS)
 
-build/core/engine.o: core/src/engine.cpp core/src/engine.hpp core/src/fast_math.hpp core/src/wavetable.hpp core/include/synth_engine.h
+build/core/engine.o: core/src/engine.cpp core/src/engine.hpp core/src/params.hpp core/src/fast_math.hpp core/src/wavetable.hpp core/include/synth_engine.h
 	@mkdir -p build/core
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CORE_FLAGS) -c $< -o $@
 
@@ -33,11 +33,11 @@ build/core/wavetable.o: core/src/wavetable.cpp core/src/wavetable.hpp core/src/f
 	@mkdir -p build/core
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CORE_FLAGS) -c $< -o $@
 
-build/render-cli: $(CORE_SOURCES) tools/render-cli/main.cpp core/include/synth_engine.h
+build/render-cli: $(CORE_SOURCES) tools/render-cli/main.cpp core/include/synth_engine.h core/src/params.hpp
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CORE_FLAGS) $(CORE_SOURCES) tools/render-cli/main.cpp -o $@
 
-build/tests: $(CORE_SOURCES) tests/test_main.cpp core/include/synth_engine.h core/src/engine.hpp core/src/fast_math.hpp core/src/rng.hpp
+build/tests: $(CORE_SOURCES) tests/test_main.cpp core/include/synth_engine.h core/src/engine.hpp core/src/params.hpp core/src/fast_math.hpp core/src/rng.hpp
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CORE_FLAGS) $(CORE_SOURCES) tests/test_main.cpp -o $@
 
