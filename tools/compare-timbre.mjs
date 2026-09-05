@@ -1,5 +1,5 @@
 // 旧音源の参照WAVと synth-engine の出力を比べる（M2 の当てはめ用）。
-// 使い方: node tools/compare-timbre.mjs build/ref/rsk_epiano.wav build/cand_epiano.wav
+// 使い方: node tools/compare-timbre.mjs design/verify/ref/rsk_epiano.wav build/cand_epiano.wav
 import fs from "node:fs";
 
 function readWav(file) {

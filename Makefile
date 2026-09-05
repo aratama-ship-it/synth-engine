@@ -4,7 +4,12 @@ CXX := clang++
 endif
 
 CPPFLAGS := -Icore/include -Icore/src
-CXXFLAGS := -std=c++20 -O2 -Wall -Wextra -Werror
+# ★-ffp-contract=off は必須（2026-09-06 実測で決定）。
+# 積和融合命令（FMA）が有効だと、ネイティブと wasm で丸めが変わり、FM を使う音色で
+# 最大 -83.7 dBFS の差が出ていた。無効にすると 8プリセット全てで【ビット一致】する。
+# 代償は処理時間 236→294 µs（p99 364 µs、期限 2667 µs の 14%）で、余裕は十分。
+# ★AU 側（shells/apple/build.sh）にも同じ指定が要る。片方だけだと AU と CLI がずれる。
+CXXFLAGS := -std=c++20 -O2 -Wall -Wextra -Werror -ffp-contract=off
 CORE_FLAGS := -fno-exceptions -fno-rtti
 FREESTANDING_FLAGS := $(CORE_FLAGS) -ffreestanding -fno-stack-protector -nostdinc++
 CORE_SOURCES := core/src/engine.cpp core/src/wavetable.cpp

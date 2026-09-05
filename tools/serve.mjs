@@ -37,7 +37,9 @@ http.createServer((req, res) => {
       chunks.push(chunk);
     });
     req.on("end", () => {
-      const dir = path.join(ROOT, "build", "ref");
+      // ★build/ に置くとクリーンビルドで消える（2026-09-06 に実際に消した）。
+      // 参照音は検証の土台なので、消えない design/verify/ref/ に置く（design/ は非公開）。
+      const dir = path.join(ROOT, "design", "verify", "ref");
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, name + ".wav"), Buffer.concat(chunks));
       res.writeHead(200, { "Content-Type": "application/json" });

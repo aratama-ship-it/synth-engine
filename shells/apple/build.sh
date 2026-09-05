@@ -44,15 +44,15 @@ plutil -lint "$SCRIPT_DIR/Info-AU.plist" "$SCRIPT_DIR/Info-App.plist" \
     "$SCRIPT_DIR/SynthEngineAU.entitlements" "$SCRIPT_DIR/SynthEngineApp.entitlements"
 
 echo "[3/8] Compile DSP core for AUv3"
-"$CLANGXX" -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti \
+"$CLANGXX" -std=c++20 -O2 -Wall -Wextra -Werror -ffp-contract=off -fno-exceptions -fno-rtti \
     -target "$TARGET" -isysroot "$SDK_PATH" -I"$ROOT_DIR/core/include" -I"$ROOT_DIR/core/src" \
     -c "$ROOT_DIR/core/src/engine.cpp" -o "$OBJECT_DIR/engine.o"
-"$CLANGXX" -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti \
+"$CLANGXX" -std=c++20 -O2 -Wall -Wextra -Werror -ffp-contract=off -fno-exceptions -fno-rtti \
     -target "$TARGET" -isysroot "$SDK_PATH" -I"$ROOT_DIR/core/include" -I"$ROOT_DIR/core/src" \
     -c "$ROOT_DIR/core/src/wavetable.cpp" -o "$OBJECT_DIR/wavetable.o"
 
 echo "[4/8] Build AUv3 extension"
-"$CLANGXX" -std=c++20 -O2 -Wall -Wextra -Werror -fobjc-arc -fblocks \
+"$CLANGXX" -std=c++20 -O2 -Wall -Wextra -Werror -ffp-contract=off -fobjc-arc -fblocks \
     -fapplication-extension -target "$TARGET" -isysroot "$SDK_PATH" -I"$ROOT_DIR/core/include" \
     -c "$SCRIPT_DIR/SynthEngineAU.mm" -o "$OBJECT_DIR/SynthEngineAU.o"
 # App Extension は MH_BUNDLE ではなく実行形式（入口 _NSExtensionMain）でないと entitlements が付かず pluginkit に登録されない（2026-09-04 実測。Claude 修正）
@@ -63,7 +63,7 @@ echo "[4/8] Build AUv3 extension"
 plutil -convert binary1 -o "$APPEX_BUNDLE/Contents/Info.plist" "$SCRIPT_DIR/Info-AU.plist"
 
 echo "[5/8] Build Swift standalone app"
-"$CLANGXX" -std=c++20 -O2 -Wall -Wextra -Werror -target "$TARGET" -isysroot "$SDK_PATH" \
+"$CLANGXX" -std=c++20 -O2 -Wall -Wextra -Werror -ffp-contract=off -target "$TARGET" -isysroot "$SDK_PATH" \
     -c "$SCRIPT_DIR/MIDIInput.cpp" -o "$OBJECT_DIR/MIDIInput.o"
 "$SWIFTC" -O -target "$TARGET" -sdk "$SDK_PATH" \
     -module-cache-path "$BUILD_DIR/module-cache" \
