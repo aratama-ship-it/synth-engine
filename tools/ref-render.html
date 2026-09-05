@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>M2 参照音の書き出し（旧音源 synth.js）</title>
+<style>
+body{margin:0;background:#141412;color:#EDE9DF;font-family:system-ui,"Hiragino Sans",sans-serif;line-height:1.6}
+.wrap{max-width:720px;margin:0 auto;padding:22px 18px 60px}
+h1{font-size:20px;margin:4px 0 6px}
+p{color:#8C877B;font-size:14px;margin:0 0 14px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{border-bottom:1px solid rgba(237,233,223,.14);padding:7px 8px;text-align:left}
+th{color:#8C877B;font-weight:400}
+td.v{font-family:ui-monospace,Menlo,monospace}
+.ok{color:#9BD17F}.ng{color:#E5836B}
+</style>
+</head>
+<body><div class="wrap">
+<h1>M2 参照音の書き出し</h1>
+<p>random-scale-keys の旧音源（<code>synth.js</code>）から4音色のドライ単音を書き出し、
+<code>build/ref/</code> へ保存します。開くと自動で走ります。</p>
+<table id="out"></table>
+</div>
+<script type="module">
+import { createSynth } from "/ref/synth.js";
+
+const table = document.getElementById("out");
+function row(name, value, cls = "") {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<th>${name}</th><td class="v ${cls}">${value}</td>`;
+  table.appendChild(tr);
+}
+
+// Float32 ステレオ WAV を組み立てる（synth-engine の render-cli と同じ形式）
+function encodeWav(buffer) {
+  const ch = buffer.numberOfChannels, frames = buffer.length, sr = buffer.sampleRate;
+  const bytes = frames * ch * 4;
+  const out = new ArrayBuffer(44 + bytes);
+  const view = new DataView(out);
+  const ascii = (off, text) => { for (let i = 0; i < text.length; i++) view.setUint8(off + i, text.charCodeAt(i)); };
+  ascii(0, "RIFF"); view.setUint32(4, 36 + bytes, true); ascii(8, "WAVE");
+  ascii(12, "fmt "); view.setUint32(16, 16, true);
+  view.setUint16(20, 3, true);            // IEEE float
+  view.setUint16(22, ch, true); view.setUint32(24, sr, true);
+  view.setUint32(28, sr * ch * 4, true); view.setUint16(32, ch * 4, true); view.setUint16(34, 32, true);
+  ascii(36, "data"); view.setUint32(40, bytes, true);
+  const chans = [];
+  for (let c = 0; c < ch; c++) chans.push(buffer.getChannelData(c));
+  let off = 44;
+  for (let i = 0; i < frames; i++) for (let c = 0; c < ch; c++) { view.setFloat32(off, chans[c][i], true); off += 4; }
+  return out;
+}
+
+const TIMBRES = ["epiano", "saw", "pluck", "bell"];
+const SR = 48000, SECONDS = 3, MIDI = 60, LENGTH = 1.5, VELOCITY = 1.0;
+
+async function renderTimbre(timbre) {
+  const context = new OfflineAudioContext(2, SR * SECONDS, SR);
+  // stem:"lead" にすると leadBus だけが出力へ回り、リバーブ・ディレイ・マスター処理を通らない＝ドライ音
+  const synth = createSynth(context, { worldId: "daylight", scaleId: "ionian", bpm: 100, stem: "lead" });
+  synth.scheduleLead({ midi: MIDI, degree: 0 }, 0.05, LENGTH, VELOCITY, "none", 0, { timbre });
+  const rendered = await context.startRendering();
+  const left = rendered.getChannelData(0);
+  let peak = 0, nan = 0;
+  for (let i = 0; i < left.length; i++) { const v = left[i]; if (!Number.isFinite(v)) nan++; else peak = Math.max(peak, Math.abs(v)); }
+  const wav = encodeWav(rendered);
+  const response = await fetch(`/refwav?name=rsk_${timbre}`, { method: "POST", body: wav });
+  const saved = await response.json();
+  const db = peak > 0 ? (20 * Math.log10(peak)).toFixed(1) : "-inf";
+  const ok = peak > 0.001 && nan === 0 && saved.ok;
+  row(timbre, `ピーク ${db} dBFS / NaN ${nan} / 保存 ${saved.bytes?.toLocaleString?.() ?? "?"} バイト`, ok ? "ok" : "ng");
+  return ok;
+}
+
+(async () => {
+  row("設定", `C4(MIDI ${MIDI}) を ${LENGTH}s・velocity ${VELOCITY}・エフェクトなし・tension 0 で ${SECONDS}s レンダー`);
+  let allOk = true;
+  for (const timbre of TIMBRES) {
+    try { allOk = (await renderTimbre(timbre)) && allOk; }
+    catch (error) { row(timbre, String(error), "ng"); allOk = false; }
+  }
+  row("結果", allOk ? "4音色すべて書き出し成功" : "失敗あり", allOk ? "ok" : "ng");
+})();
+</script>
+</body></html>

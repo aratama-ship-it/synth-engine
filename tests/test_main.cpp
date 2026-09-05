@@ -666,6 +666,25 @@ static bool test_sub_oscillator() {
     return ok;
 }
 
+static bool test_sub_oscillator_one_octave_up() {
+    constexpr uint32_t sampleRate = 48000;
+    constexpr uint32_t fftSize = 4096;
+    constexpr float midi = 69.0f;
+    const double expected = 440.0 * 2.0;
+    std::vector<Parameters> params = clean_analysis_params();
+    params.insert(params.end(), {{2, 0.0f}, {29, 1.0f}, {30, 0.0f}, {31, 1.0f}});
+    const StereoRender output = render_stereo(sampleRate, 128, 16384,
+        {{0, SYNTH_EV_NOTE_ON, 72, midi, 1.0f}}, params, 277u);
+    const std::vector<double> power = spectrum_power(output.left, 8192, fftSize, false);
+    const double peak = peak_frequency(power, sampleRate, fftSize, 700.0, 1050.0);
+    const double ratio = peak / expected;
+    const bool ok = !power.empty() && std::isfinite(ratio) &&
+                    std::fabs(ratio - 1.0) <= 0.02;
+    std::printf("%s 49 sub +1 octave: peak_hz=%.6f expected_hz=%.6f ratio=%.9f tolerance=+/-2%%\n",
+                ok ? "PASS" : "FAIL", peak, expected, ratio);
+    return ok;
+}
+
 static bool test_noise_decay_determinism() {
     std::vector<Parameters> params = clean_analysis_params();
     params.insert(params.end(), {{2, 0.0f}, {32, 1.0f}, {33, 0.0f}, {34, 0.05f}});
@@ -2058,6 +2077,7 @@ int main() {
     passed += test_macro_event();
     passed += test_m1c_determinism();
     passed += test_m1c_performance();
-    std::printf("SUMMARY passed=%u failed=%u total=48\n", passed, 48u - passed);
-    return passed == 48 ? 0 : 1;
+    passed += test_sub_oscillator_one_octave_up();
+    std::printf("SUMMARY passed=%u failed=%u total=49\n", passed, 49u - passed);
+    return passed == 49 ? 0 : 1;
 }

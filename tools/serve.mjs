@@ -8,6 +8,9 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.argv[2] || 8963);
+// M2 の参照音づくり専用の読み取り専用マウント。random-scale-keys の旧音源を
+// 同一オリジンで import できるようにするためだけのもの（書き込みは一切しない）。
+const REF_ROOT = path.resolve(ROOT, "../random-scale-keys/prototype");
 const TYPES = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -22,6 +25,27 @@ http.createServer((req, res) => {
   // ブラウザ自己診断（shells/web/selftest.html）の結果を受け取って追記する。
   // Safari は Claude のブラウザツールから操作できないため、ページ側から結果を送ってもらう。
   // 127.0.0.1 のみで待ち受けており、書き込み先は下の1ファイルに固定。
+  // 参照WAV（旧音源のレンダー結果）を受け取って build/ref/ へ保存する。名前は英数字のみ、上限8MB。
+  if (req.method === "POST" && rel === "/refwav") {
+    const name = (new URL(req.url, "http://localhost").searchParams.get("name") || "").toLowerCase();
+    if (!/^[a-z0-9_]{1,40}$/.test(name)) { res.writeHead(400); res.end("bad name"); return; }
+    const chunks = [];
+    let total = 0;
+    req.on("data", (chunk) => {
+      total += chunk.length;
+      if (total > 8 * 1024 * 1024) { req.destroy(); return; }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      const dir = path.join(ROOT, "build", "ref");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, name + ".wav"), Buffer.concat(chunks));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, name, bytes: total }));
+    });
+    return;
+  }
+
   if (req.method === "POST" && rel === "/report") {
     let body = "";
     req.on("data", (chunk) => {
@@ -40,8 +64,10 @@ http.createServer((req, res) => {
 
   // `/` はブラウザ版デモへ。試聴ページ（design/listen/）は手元だけの判断用で公開物には含まれない。
   if (rel === "/") { res.writeHead(302, { Location: "/shells/web/demo.html" }); res.end(); return; }
-  const target = path.normalize(path.join(ROOT, rel));
-  if (!target.startsWith(ROOT)) { res.writeHead(403); res.end("403"); return; }
+  let base = ROOT;
+  if (rel.startsWith("/ref/")) { base = REF_ROOT; rel = rel.slice(4); }
+  const target = path.normalize(path.join(base, rel));
+  if (!target.startsWith(base)) { res.writeHead(403); res.end("403"); return; }
   fs.stat(target, (err, stat) => {
     if (err || !stat.isFile()) { res.writeHead(404); res.end("404"); return; }
     const type = TYPES[path.extname(target)] || "application/octet-stream";

@@ -43,7 +43,7 @@ inline constexpr SynthParamInfo kParameterInfo[] = {
     {28, "fmBToA", "FM B to A", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
     {29, "subLevel", "Sub Level", 0.0f, 4.0f, 0.0f, SYNTH_PARAM_FLAG_GAIN},
     {30, "subShape", "Sub Shape", 0.0f, 2.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
-    {31, "subOctave", "Sub Octave", -2.0f, 0.0f, -1.0f,
+    {31, "subOctave", "Sub Octave", -2.0f, 1.0f, -1.0f,
      SYNTH_PARAM_FLAG_INTEGER | SYNTH_PARAM_FLAG_OCTAVES | SYNTH_PARAM_FLAG_BIPOLAR},
     {32, "noiseLevel", "Noise Level", 0.0f, 4.0f, 0.0f, SYNTH_PARAM_FLAG_GAIN},
     {33, "noiseColor", "Noise Color", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
