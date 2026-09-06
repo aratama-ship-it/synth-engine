@@ -248,6 +248,41 @@ C++ CLIレンダラー（プリセット＋イベントJSON → WAV）を基準�
 - 残（本人の判断・操作が要るもの）: **試聴ページの音の判定**、
   M1a の位相ねじれの決着（M2で）、AU の製品名とコード（暫定 Sken/Arat）。次の実装は **M1b-2**（`SPEC_M1b2.md`＝パラメータ定義をコアに一本化して AU/Web へ公開）。
 
+- **2026-09-06 M3c-1 完了（Web Worklet の時計原点を AudioContext と統一）**。
+  Worklet 内部の生成時ゼロ起点ではなく `AudioWorkletGlobalScope.currentFrame` をライブ時刻の正本にし、
+  `context.currentTime * sampleRate` で予約する呼び出し側と一致させた。Node上の単体検査には従来カウンタをfallbackとして残す。
+  既に500 ms動作中のContextへノードを後から挿した実Chromiumプローブで、修正前の490.7 ms遅延に対し、
+  修正後は `actualContextFrame = workletFrame = targetFrame = 24704`、遅延0 msを確認。
+  同じworkletを random-scale-keys へバイト一致で反映。C++コア/C ABI/WASM/旧音源経路は変更なし。仕様は `SPEC_M3c1.md`。
+
+- **2026-09-06 M3c-2 完了（同時発音のVOICE_PARAMを入力順バンドルへ修正）**。
+  同一offsetで`VOICE_PARAM`を全て先に集める処理と、Workletのkind優先ソートを廃止した。
+  `NOTE_OFF`と`PARAM/MACRO`を先に処理した後は、`VOICE_PARAM* → NOTE_ON`を入力配列順に一つずつ処理する。
+  これにより通常C4とdelay付きG4を同時予約しても、delay設定はG4だけへ適用される。
+  `SynthEvent`の20 byte ABIとイベントkindは維持し、同時発音の意味変更に伴いengine versionを7から8へ更新。
+  コア59/59、Web13/13、freestanding、WASM/CLI dry/sendビット一致を確認。仕様は`SPEC_M3c2.md`。
+
+- **2026-09-06 M3c-3 完了（同音連打を発音ハンドルで個別終了）**。
+  Webの`noteOn()`／`noteOnWith()`は発音ごとに不透明な`NoteHandle`を返し、`noteOff(handle)`だけを受け付ける。
+  MIDI音高・別Nodeのhandleは明示的に拒否し、内部の発音IDは1..0xffffffffで単調増加・再利用なしとした。
+  同じC4を重ね、片方のOFF後にもう片方が残るPCMをblock 1/7/64/128/511で固定した。
+  C ABIの20 byte `SynthEvent`、DSP、engine version 8、WASMは変更なし。
+  コア60/60、Web13/13、freestanding、WASM/CLI dry/sendビット一致を確認。仕様は`SPEC_M3c3.md`。
+
+- **2026-09-06 Web Synth UI 追加（ローカル・非公開）**。
+  `shells/web/synth.html`を追加し、既存4プリセットと物理/画面鍵盤、OSC A、OSC B/MIX、FILTER、AMP EG、LFO/Macro、詳細パラメータの編集面を作成した。
+  Web Node APIの`setParam()`と既存プリセットを使うだけで、DSP/C ABI/WASM、AU、スタンドアロン、random-scale-keysは変更なし。
+  390×844と1440×900のdesign-lintはNG 0/WARN 0。設計メモとトークンは`design/SYNTH_UI_*.md`。
+  同日の操作性修正で「AUDIOを開始」ボタンを廃止。AudioContext/Workletは先読みし、最初の画面鍵盤またはPCキー操作でresumeと発音を一続きにした。初期化待ちにキーを離した場合は発音を開始せず、フォーカス離脱時も待機中／発音中の両方を解除する。
+  続く修正でrange操作後にもPC鍵盤入力を受けるようにした。以前はrangeがフォーカスを保持すると`keydown`を入力欄として除外し、音源停止に見える状態になっていた。プリセット選択中だけは通常の選択操作を優先する。
+  音色拡張の第1波として、既存DSPだけで作る6つの試聴候補（Wide Pad / Warm Bass / Glass Bell / Bright Pluck / Motion Lead / Air Keys）を追加。プリセット読込は全パラメータを既定値へ戻してから適用する方式に改め、前の音色設定が次の音色へ混ざらないようにした。プリセット選択後はselectからフォーカスを外し、すぐPC鍵盤演奏へ戻れる。空間系エフェクトは別waveで、既存のsend出力を使って追加する計画。
+
+- **2026-09-06 Web Synth SPACEバス追加（ローカル・非公開）**。
+  Web殻だけで既存のsend出力（出力1）を120 Hzハイパス後にフィードバック・ディレイと畳み込み残響へ分岐させた。dry出力（出力0）は従来どおり直接出力するため、DSP/C ABI/WASM、AU、スタンドアロン、random-scale-keysは変更なし。UIは`SEND / ECHO / TIME / SPACE`の4操作とし、Studio 6音色には用途別のセンド量と初期空間値を付与した。`shells/web/space-effects.js`は依存なしで、テストはセンド出力だけを経路に使うことと値の範囲を検査する。聴感の最終判定は本人確認待ち。
+
+- **2026-09-07 Web Synth 残響の質感追加（ローカル・非公開）**。
+  SPACEへ`MATERIAL`（CLEAR / WARM / GRAIN）を追加。各選択は畳み込みインパルスの長さ・減衰・密度、残響バスのローパス周波数、プリディレイを同時に変える。CLEARは既存の明るい密な残響に近く、WARMは高域を抑えた長い残響、GRAINは短く疎らな反射である。Studio 6音色に素材ごとの初期値を設定し、MATERIAL選択後はPC鍵盤の入力に戻れるようselectをblurする。コアDSP/C ABI/WASMには変更なし。聴感は本人確認待ち。
+
 ## 進め方
 
 思考・設計・検証は Claude、実装は Codex へ委譲（`_claude-rules/codex-delegation.md`）。

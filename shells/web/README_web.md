@@ -15,7 +15,19 @@ Chromium 系ブラウザで次を開く。
 
 <http://localhost:8963/shells/web/demo.html>
 
+通常の音色編集と演奏は、次の独立した画面を使う。既存の検証用`demo.html`はそのまま残す。
+
+<http://localhost:8963/shells/web/synth.html>
+
 `file://` では AudioWorklet と相対 `fetch` の確認ができないため、必ず HTTP で配信する。
+
+## Web Synth UI
+
+`synth.html`は、EPiano / Saw / Pluck / Bellに加え、Wide Pad / Warm Bass / Glass Bell / Bright Pluck / Motion Lead / Air Keysを起点に、OSC A、OSC B / MIX、FILTER、AMP ENVELOPE、LFO / MACRO、FX BUS、DELAY、REVERBを音の流れで編集する通常のシンセ画面である。PCキー`A W S E D F T G Y H U J K`または画面鍵盤の最初の操作で音源を開始し、そのまま演奏できる。プリセットを選ぶと全76パラメータを既定値へ戻してから当該音色を読むため、直前の音色設定は混ざらない。主要パラメータは直ちに`setParam()`へ送られ、残りのDSPパラメータは「詳細設定」に畳んでいる。
+
+FX BUSはコアのsend出力だけを受けるWeb Audioの入口である。その先は並列の`DELAY`と`REVERB`へ分かれ、各モジュールの`SEND`で入力を独立して止められる。`DELAY`は`MIX`と80〜720 msの`TIME`を持ち、初期値の`SEND`は0なので、INITでは反復エコーを鳴らさない。`REVERB`は`SEND`、`MATERIAL`、`MIX`を持つ。`CLEAR`は明るく密な既定残響、`WARM`は高域を抑えた長い残響、`GRAIN`は短く疎らな反射である。dry出力は従来どおり直接出力される。低域の濁りを避けるため、FX BUSの入口を120 Hzでハイパスしている。
+
+このUIはWeb殻だけの追加であり、DSP/C ABI/WASM、AU、スタンドアロン、random-scale-keysの既定経路を変更しない。設計メモと数値トークンは`design/SYNTH_UI_DESIGN.md`、`design/SYNTH_UI_TOKEN_SHEET.md`に置く。
 
 ## 確認手順
 
@@ -28,19 +40,26 @@ Chromium 系ブラウザで次を開く。
 7. native 比較が最大 −100 dBFS 以下、RMS −120 dBFS 以下であることを確認する。
 8. WASM サイズ、batch ready、`process()` の average / p99 が画面に出ることを確認する。性能値は直近最大1000ブロックを対象にし、100ブロックごとに更新する。
 
-## M3b-1 API
+## M3c-3 API
 
 ```js
 const frame = Math.ceil(context.currentTime * context.sampleRate);
-synth.voiceParam([[37, 4000]], frame);
-synth.noteOnWith(60, 0.8, [[37, 4000], [75, 1]], frame);
+const note = synth.noteOnWith(60, 0.8, [[37, 4000], [75, 1]], frame);
+synth.noteOff(note, frame + Math.round(context.sampleRate * 0.3));
 
 synth.connect(context.destination);          // 既定どおり dry（出力0）
 synth.connect(delayInput, synth.sendOutput); // sendOutput は出力番号1
 // 上と同じ指定: synth.connect(delayInput, 1)
 ```
 
-MessagePortへ直接送る場合は`{type:"voiceParam", params:[[id, value], ...], frame?}`を使う。`frame`省略時はWorkletが次に処理するブロックの先頭へ置く。`{type:"events"}`と`batch`のイベント配列も`kind:5`を受け付ける。同一フレームでは`VOICE_PARAM`をNOTE_ONより前へ並べる。
+`noteOn()`と`noteOnWith()`は発音ごとに不透明な`NoteHandle`を返す。`noteOff()`はMIDI音高ではなく、この同じNodeが返したhandleだけを受け付ける。これにより同じC4を重ねても、一方だけを個別に終了できる。数値の`noteOff(60)`、別Nodeのhandle、ID空間が尽きた後の発音は例外で拒否する。低水準の`sendEvents()`は残るが、呼び出し側がNOTE_ON/OFFの一意な`id`を管理する。
+
+同時発音で音符ごとの設定を結ぶ正規入口は`noteOnWith()`である。これは同一`frame`の`VOICE_PARAM* → NOTE_ON`を一つの`events`メッセージとして送る。MessagePortへ直接送る低水準APIは`{type:"voiceParam", params:[[id, value], ...], frame?}`を使えるが、すでに送った同時フレームのNOTE_ONへは遡及しない。`frame`省略時はWorkletが次に処理するブロックの先頭へ置く。`{type:"events"}`と`batch`のイベント配列も`kind:5`を受け付け、同一フレームでは入力配列の順序を保持する。
+
+ライブのフレーム時刻は `AudioWorkletGlobalScope.currentFrame` を正本にする。呼び出し側は
+`Math.ceil(context.currentTime * context.sampleRate)` で同じ AudioContext の絶対フレームを送り、
+Workletを後から生成しても時刻原点はずれない。Node上の検査では `currentFrame` が無いため、
+Worklet内部カウンタへフォールバックする。
 
 `connect(destination, outputIndex = 0)`の第2引数は省略可能であり、従来の`connect(destination)`はdry出力へ接続する。
 

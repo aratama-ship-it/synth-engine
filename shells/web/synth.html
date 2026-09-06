@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="SynthEngineのウェーブテーブル・シンセサイザーをブラウザで演奏し編集する画面">
+  <title>SynthEngine — Web Synth</title>
+  <link rel="stylesheet" href="./synth-ui.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="identity"><span class="identity-mark" aria-hidden="true">SE</span><h1>SynthEngine</h1><span class="identity-sub">WEB SYNTH</span></div>
+    <div class="top-controls">
+      <label class="preset-picker">PRESET <select id="preset" aria-label="プリセット"></select></label>
+      <button id="init" class="button button-quiet" type="button">INIT</button>
+    </div>
+  </header>
+
+  <main>
+    <p id="status" class="status" role="status" aria-live="polite">WASMを読み込んでいます…</p>
+
+    <section class="overview" aria-labelledby="overview-title">
+      <div><p class="eyebrow">SIGNAL PATH</p><h2 id="overview-title">OSC A + OSC B → MIX → FILTER → AMP → FX BUS → DELAY / REVERB</h2></div>
+      <div id="global-controls" class="global-controls" aria-label="グローバル設定"></div>
+    </section>
+
+    <section class="synth-grid" aria-label="音色編集">
+      <section class="module module-osc" aria-labelledby="osc-a-title"><div class="module-heading"><p>01</p><h2 id="osc-a-title">OSC A</h2></div><div id="osc-a" class="control-grid"></div></section>
+      <section class="module module-osc" aria-labelledby="osc-b-title"><div class="module-heading"><p>02</p><h2 id="osc-b-title">OSC B / MIX</h2></div><div id="osc-b" class="control-grid"></div></section>
+      <section class="module module-filter" aria-labelledby="filter-title"><div class="module-heading"><p>03</p><h2 id="filter-title">FILTER</h2></div><div id="filter" class="control-grid"></div></section>
+      <section class="module module-amp" aria-labelledby="amp-title"><div class="module-heading"><p>04</p><h2 id="amp-title">AMP ENVELOPE</h2></div><div id="amp" class="control-grid"></div></section>
+      <section class="module module-mod" aria-labelledby="mod-title"><div class="module-heading"><p>05</p><h2 id="mod-title">LFO / MACRO</h2></div><div id="mod" class="control-grid"></div></section>
+      <section class="module module-delay" aria-labelledby="delay-title"><div class="module-heading"><p>06</p><h2 id="delay-title">DELAY</h2></div><div id="delay" class="control-grid"></div></section>
+      <section class="module module-reverb" aria-labelledby="reverb-title"><div class="module-heading"><p>07</p><h2 id="reverb-title">REVERB</h2></div><div id="reverb" class="control-grid"></div></section>
+    </section>
+
+    <section class="keyboard-section" aria-labelledby="keyboard-title">
+      <div class="keyboard-heading"><div><p class="eyebrow">PLAY</p><h2 id="keyboard-title">KEYBOARD</h2></div><p>PC: A W S E D F T G Y H U J K　/　最初の鍵盤操作で音源を開始</p></div>
+      <div class="piano-scroll"><div id="piano" class="piano" aria-label="C4からC6までの鍵盤"></div></div>
+    </section>
+
+    <details class="advanced"><summary>詳細設定 <span>残りのDSPパラメータを表示</span></summary><div id="advanced-controls" class="advanced-controls"></div></details>
+  </main>
+  <script type="module" src="./synth-ui.js"></script>
+</body>
+</html>
