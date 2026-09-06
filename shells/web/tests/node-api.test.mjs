@@ -13,7 +13,7 @@ function parameterExports() {
   };
 }
 
-test("node API exposes two stereo outputs, ordered noteOnWith events, and output-selecting connect", async () => {
+test("node API exposes two stereo outputs and unique NoteHandles for same-pitch notes", async () => {
   const originalInstantiate = WebAssembly.instantiate;
   const OriginalAudioWorkletNode = globalThis.AudioWorkletNode;
   const messages = [];
@@ -57,18 +57,36 @@ test("node API exposes two stereo outputs, ordered noteOnWith events, and output
     assert.deepEqual(connections, [[destination, 0], [destination, 1]]);
 
     synth.voiceParam([[37, 4000]]);
-    synth.noteOnWith(60, 0.75, [[37, 4000], [75, 1]], 1234);
+    const first = synth.noteOn(60, 0.5, 1200);
+    const second = synth.noteOnWith(60, 0.75, [[37, 4000], [75, 1]], 1234);
+    assert.notEqual(first, second);
+    assert.equal(Object.isFrozen(first), true);
+    assert.deepEqual(Object.keys(first), []);
+    synth.noteOff(first, 1300);
+    assert.throws(() => synth.noteOff(60), /NoteHandle/);
     assert.deepEqual(messages, [
       { type: "voiceParam", params: [[37, 4000]], frame: 48000 },
+      {
+        type: "events",
+        events: [{ frame: 1200, kind: 1, id: 1, a: 60, b: 0.5 }],
+      },
       {
         type: "events",
         events: [
           { frame: 1234, kind: 5, id: 37, a: 4000, b: 0 },
           { frame: 1234, kind: 5, id: 75, a: 1, b: 0 },
-          { frame: 1234, kind: 1, id: 60, a: 60, b: 0.75 },
+          { frame: 1234, kind: 1, id: 2, a: 60, b: 0.75 },
         ],
       },
+      {
+        type: "events",
+        events: [{ frame: 1300, kind: 2, id: 1, a: 0, b: 0 }],
+      },
     ]);
+
+    const otherSynth = await createSynthNode(context, new ArrayBuffer(0));
+    const foreignHandle = otherSynth.noteOn(60, 0.5, 1400);
+    assert.throws(() => synth.noteOff(foreignHandle), /NoteHandle/);
   } finally {
     WebAssembly.instantiate = originalInstantiate;
     globalThis.AudioWorkletNode = OriginalAudioWorkletNode;

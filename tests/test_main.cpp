@@ -867,7 +867,7 @@ static bool test_parameter_sweep() {
             ++renders;
         }
     }
-    const bool ok = renders == 228 && nonFinite == 0 && peak <= 8.0 && synth_engine_version() == 7;
+    const bool ok = renders == 228 && nonFinite == 0 && peak <= 8.0 && synth_engine_version() == 8;
     std::printf("%s 19 parameter sweep: renders=%u nan_inf=%llu peak=%.9f limit=8.000000 version=%u\n",
                 ok ? "PASS" : "FAIL", renders,
                 static_cast<unsigned long long>(nonFinite), peak, synth_engine_version());
@@ -2124,8 +2124,8 @@ static StereoRender render_voice_filter_override_sequence() {
     const std::vector<TimedEvent> events = {
         {0, SYNTH_EV_NOTE_ON, 801, 60.0f, 1.0f},
         {8192, SYNTH_EV_NOTE_OFF, 801, 0.0f, 0.0f},
-        {8192, SYNTH_EV_NOTE_ON, 802, 60.0f, 1.0f},
         {8192, SYNTH_EV_VOICE_PARAM, 37, 4000.0f, 0.0f},
+        {8192, SYNTH_EV_NOTE_ON, 802, 60.0f, 1.0f},
         {16384, SYNTH_EV_NOTE_OFF, 802, 0.0f, 0.0f},
         {16384, SYNTH_EV_NOTE_ON, 803, 60.0f, 1.0f}
     };
@@ -2223,8 +2223,8 @@ static bool test_per_note_send() {
     const std::vector<TimedEvent> events = {
         {0, SYNTH_EV_NOTE_ON, 851, 60.0f, 1.0f},
         {4096, SYNTH_EV_NOTE_OFF, 851, 0.0f, 0.0f},
-        {4096, SYNTH_EV_NOTE_ON, 852, 60.0f, 1.0f},
-        {4096, SYNTH_EV_VOICE_PARAM, 75, 1.0f, 0.0f}
+        {4096, SYNTH_EV_VOICE_PARAM, 75, 1.0f, 0.0f},
+        {4096, SYNTH_EV_NOTE_ON, 852, 60.0f, 1.0f}
     };
     const SendRender output = render_send(48000, 128, 8192, events, send_test_params(0.0f), 293u);
     double firstPeak = 0.0;
@@ -2251,8 +2251,8 @@ static size_t send_render_mismatches(const SendRender& a, const SendRender& b) {
 
 static bool test_voice_param_send_determinism() {
     const std::vector<TimedEvent> events = {
-        {0, SYNTH_EV_NOTE_ON, 861, 48.0f, 0.8f},
         {0, SYNTH_EV_VOICE_PARAM, 1, 0.8f, 0.0f},
+        {0, SYNTH_EV_NOTE_ON, 861, 48.0f, 0.8f},
         {256, SYNTH_EV_VOICE_PARAM, 37, 4000.0f, 0.0f},
         {256, SYNTH_EV_VOICE_PARAM, 75, 0.75f, 0.0f},
         {257, SYNTH_EV_NOTE_ON, 862, 55.0f, 0.6f},
@@ -2307,6 +2307,131 @@ static bool test_voice_param_send_determinism() {
     return ok;
 }
 
+static const synth::Voice* voice_with_note_id(const SynthEngine* engine, uint32_t noteId) {
+    for (uint32_t i = 0; i < synth::kVoiceCapacity; ++i)
+        if (engine->voices[i].active != 0 && engine->voices[i].noteId == noteId)
+            return &engine->voices[i];
+    return nullptr;
+}
+
+static bool has_send_override(const synth::Voice* voice, float expected) {
+    constexpr uint32_t sendIndex = synth::kVoiceParamCount - 1u;
+    constexpr uint32_t sendBit = 1u << sendIndex;
+    return voice != nullptr && (voice->voiceParamMask & sendBit) != 0 &&
+        std::fabs(voice->voiceParams[sendIndex] - expected) < 1.0e-6f;
+}
+
+static bool test_voice_param_same_offset_bundles() {
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 64);
+    if (engine == nullptr || synth_set_param(engine, 75, 0.0f) != 0) return false;
+    float left[64]{};
+    float right[64]{};
+    float sendLeft[64]{};
+    float sendRight[64]{};
+    const SynthEvent forward[] = {
+        {0, SYNTH_EV_VOICE_PARAM, 75, 0.0f, 0.0f},
+        {0, SYNTH_EV_NOTE_ON, 901, 60.0f, 1.0f},
+        {0, SYNTH_EV_VOICE_PARAM, 75, 0.5f, 0.0f},
+        {0, SYNTH_EV_NOTE_ON, 902, 64.0f, 1.0f},
+        {0, SYNTH_EV_VOICE_PARAM, 75, 1.0f, 0.0f},
+        {0, SYNTH_EV_NOTE_ON, 903, 67.0f, 1.0f},
+    };
+    const int forwardResult = synth_process_send(
+        engine, forward, 6, left, right, sendLeft, sendRight, 64);
+    const bool forwardOk = forwardResult == 0 &&
+        has_send_override(voice_with_note_id(engine, 901), 0.0f) &&
+        has_send_override(voice_with_note_id(engine, 902), 0.5f) &&
+        has_send_override(voice_with_note_id(engine, 903), 1.0f);
+
+    synth_reset(engine, SYNTH_RESET_VOICES, 313u);
+    const SynthEvent reverse[] = {
+        {0, SYNTH_EV_VOICE_PARAM, 75, 1.0f, 0.0f},
+        {0, SYNTH_EV_NOTE_ON, 903, 67.0f, 1.0f},
+        {0, SYNTH_EV_VOICE_PARAM, 75, 0.5f, 0.0f},
+        {0, SYNTH_EV_NOTE_ON, 902, 64.0f, 1.0f},
+        {0, SYNTH_EV_VOICE_PARAM, 75, 0.0f, 0.0f},
+        {0, SYNTH_EV_NOTE_ON, 901, 60.0f, 1.0f},
+    };
+    const int reverseResult = synth_process_send(
+        engine, reverse, 6, left, right, sendLeft, sendRight, 64);
+    const bool reverseOk = reverseResult == 0 &&
+        has_send_override(voice_with_note_id(engine, 901), 0.0f) &&
+        has_send_override(voice_with_note_id(engine, 902), 0.5f) &&
+        has_send_override(voice_with_note_id(engine, 903), 1.0f);
+    const bool ok = forwardOk && reverseOk;
+    std::printf("%s 57 same-offset voice param bundles: forward=%d reverse=%d levels=0,0.5,1\n",
+        ok ? "PASS" : "FAIL", forwardOk, reverseOk);
+    return ok;
+}
+
+static bool test_voice_param_cross_block_bundle() {
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 1);
+    if (engine == nullptr || synth_set_param(engine, 75, 0.0f) != 0) return false;
+    float left = 0.0f;
+    float right = 0.0f;
+    float sendLeft = 0.0f;
+    float sendRight = 0.0f;
+    const SynthEvent pending{0, SYNTH_EV_VOICE_PARAM, 75, 1.0f, 0.0f};
+    const SynthEvent firstNote{0, SYNTH_EV_NOTE_ON, 911, 60.0f, 1.0f};
+    const SynthEvent secondNote{0, SYNTH_EV_NOTE_ON, 912, 67.0f, 1.0f};
+    const int pendingResult = synth_process_send(
+        engine, &pending, 1, &left, &right, &sendLeft, &sendRight, 1);
+    const int firstResult = synth_process_send(
+        engine, &firstNote, 1, &left, &right, &sendLeft, &sendRight, 1);
+    const int secondResult = synth_process_send(
+        engine, &secondNote, 1, &left, &right, &sendLeft, &sendRight, 1);
+    const bool firstHasOverride = has_send_override(voice_with_note_id(engine, 911), 1.0f);
+    const synth::Voice* second = voice_with_note_id(engine, 912);
+    constexpr uint32_t sendBit = 1u << (synth::kVoiceParamCount - 1u);
+    const bool secondHasNoOverride = second != nullptr && (second->voiceParamMask & sendBit) == 0;
+    const bool ok = pendingResult == 0 && firstResult == 0 && secondResult == 0 &&
+        firstHasOverride && secondHasNoOverride;
+    std::printf("%s 58 cross-block voice param bundle: first_override=%d second_override=%d\n",
+        ok ? "PASS" : "FAIL", firstHasOverride, !secondHasNoOverride);
+    return ok;
+}
+
+static bool test_note_instance_ids() {
+    const std::vector<TimedEvent> events = {
+        {0, SYNTH_EV_NOTE_ON, 921, 60.0f, 1.0f},
+        {128, SYNTH_EV_NOTE_ON, 922, 60.0f, 1.0f},
+        {256, SYNTH_EV_NOTE_OFF, 921, 0.0f, 0.0f},
+        {768, SYNTH_EV_NOTE_OFF, 922, 0.0f, 0.0f},
+    };
+    const StereoRender reference = render_stereo(48000, 1, 1024, events, {}, 317u);
+    const uint32_t blocks[] = {7, 64, 128, 511};
+    size_t blockMismatch = 0;
+    for (uint32_t block : blocks) {
+        const StereoRender candidate = render_stereo(48000, block, 1024, events, {}, 317u);
+        blockMismatch += bit_mismatches(reference.left, candidate.left);
+        blockMismatch += bit_mismatches(reference.right, candidate.right);
+    }
+
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 4);
+    if (engine == nullptr) return false;
+    float left[4]{};
+    float right[4]{};
+    const SynthEvent earlyEvents[] = {
+        {0, SYNTH_EV_NOTE_ON, 921, 60.0f, 1.0f},
+        {1, SYNTH_EV_NOTE_ON, 922, 60.0f, 1.0f},
+        {2, SYNTH_EV_NOTE_OFF, 921, 0.0f, 0.0f},
+    };
+    const int result = synth_process(engine, earlyEvents, 3, left, right, 4);
+    const synth::Voice* first = voice_with_note_id(engine, 921);
+    const synth::Voice* second = voice_with_note_id(engine, 922);
+    const bool independentlyReleased = first != nullptr && second != nullptr &&
+        first->stage == synth::kEnvRelease && second->stage != synth::kEnvRelease;
+    const bool ok = result == 0 && reference.left.size() == 1024 && blockMismatch == 0 &&
+        independentlyReleased;
+    std::printf("%s 60 note instance IDs: same_midi=60 first_release=%d second_remaining=%d block_mismatches=%zu\n",
+        ok ? "PASS" : "FAIL", first != nullptr && first->stage == synth::kEnvRelease,
+        second != nullptr && second->stage != synth::kEnvRelease, blockMismatch);
+    return ok;
+}
+
 static bool test_voice_param_performance() {
     constexpr uint32_t block = 128;
     constexpr uint32_t iterations = 1000;
@@ -2332,13 +2457,13 @@ static bool test_voice_param_performance() {
     SynthEvent startEvents[48]{};
     for (uint32_t i = 0; i < 16; ++i) {
         startEvents[i * 3] = SynthEvent{
-            i, SYNTH_EV_NOTE_ON, 900u + i, 36.0f + i * 2.0f, 0.7f
-        };
-        startEvents[i * 3 + 1] = SynthEvent{
             i, SYNTH_EV_VOICE_PARAM, 37, 800.0f + 80.0f * i, 0.0f
         };
-        startEvents[i * 3 + 2] = SynthEvent{
+        startEvents[i * 3 + 1] = SynthEvent{
             i, SYNTH_EV_VOICE_PARAM, 75, 0.5f, 0.0f
+        };
+        startEvents[i * 3 + 2] = SynthEvent{
+            i, SYNTH_EV_NOTE_ON, 900u + i, 36.0f + i * 2.0f, 0.7f
         };
     }
     float left[block]{};
@@ -2368,7 +2493,7 @@ static bool test_voice_param_performance() {
     const double average = sum / iterations;
     const double p99 = timings[static_cast<size_t>(iterations * 0.99)];
     const bool ok = std::isfinite(average) && std::isfinite(p99) && p99 < deadline * 0.5;
-    std::printf("%s 57 voice param performance: overrides=16 slots=6 voices=16 unison=4 LP24 average_us=%.6f p99_us=%.6f half_deadline_us=%.6f\n",
+    std::printf("%s 59 voice param performance: overrides=16 slots=6 voices=16 unison=4 LP24 average_us=%.6f p99_us=%.6f half_deadline_us=%.6f\n",
         ok ? "PASS" : "FAIL", average, p99, deadline * 0.5);
     return ok;
 }
@@ -2432,6 +2557,9 @@ int main() {
     passed += test_per_note_send();
     passed += test_voice_param_send_determinism();
     passed += test_voice_param_performance();
-    std::printf("SUMMARY passed=%u failed=%u total=57\n", passed, 57u - passed);
-    return passed == 57 ? 0 : 1;
+    passed += test_voice_param_same_offset_bundles();
+    passed += test_voice_param_cross_block_bundle();
+    passed += test_note_instance_ids();
+    std::printf("SUMMARY passed=%u failed=%u total=60\n", passed, 60u - passed);
+    return passed == 60 ? 0 : 1;
 }

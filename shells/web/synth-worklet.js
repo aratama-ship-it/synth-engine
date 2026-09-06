@@ -8,6 +8,14 @@ const EVENT_CAPACITY = 4096;
 const MAX_BLOCK = 512;
 const VOICE_PARAM_KIND = 5;
 
+// AudioWorkletGlobalScope.currentFrame は AudioContext 全体の絶対フレーム。
+// ライブの呼び出し側も同じ時刻系でイベントを送る。Node上の検査では未定義なので、
+// 従来のWorklet内部カウンタをfallbackとして残す。
+export function audioContextFrame(fallback) {
+  const frame = Number(globalThis.currentFrame);
+  return Number.isSafeInteger(frame) && frame >= 0 ? frame : fallback;
+}
+
 function align16(value) {
   return (value + 15) & ~15;
 }
@@ -97,8 +105,7 @@ export class AbsoluteEventRing {
     due.sort((left, right) => {
       const frameOrder = left.offset - right.offset;
       if (frameOrder !== 0) return frameOrder;
-      const kindOrder = Number(right.kind === VOICE_PARAM_KIND) - Number(left.kind === VOICE_PARAM_KIND);
-      return kindOrder || (left.sequence - right.sequence);
+      return left.sequence - right.sequence;
     });
     return due;
   }
@@ -215,7 +222,9 @@ export class SynthEngineProcessor extends ProcessorBase {
         if (!this.ring.pushMany(message.events)) throw new Error(`event ring capacity exceeded (${EVENT_CAPACITY})`);
         break;
       case "voiceParam": {
-        const frame = message.frame === undefined ? this.renderFrame : message.frame;
+        const frame = message.frame === undefined
+          ? audioContextFrame(this.renderFrame)
+          : message.frame;
         if (!this.ring.pushMany(voiceParamEvents(message.params, frame))) {
           throw new Error(`event ring capacity exceeded (${EVENT_CAPACITY})`);
         }
@@ -271,8 +280,9 @@ export class SynthEngineProcessor extends ProcessorBase {
     const sendOutput = outputs[1];
     const frameCount = dryOutput?.[0]?.length ?? 0;
     if (frameCount === 0 || this.failed) return true;
+    const blockStart = audioContextFrame(this.renderFrame);
     if (!this.ready) {
-      this.renderFrame += frameCount;
+      this.renderFrame = blockStart + frameCount;
       return true;
     }
     if (frameCount > MAX_BLOCK) {
@@ -282,7 +292,7 @@ export class SynthEngineProcessor extends ProcessorBase {
 
     const started = nowMs();
     try {
-      const events = this.ring.takeBlock(this.renderFrame, frameCount);
+      const events = this.ring.takeBlock(blockStart, frameCount);
       const data = new DataView(this.memory.buffer);
       for (let i = 0; i < events.length; i += 1) {
         const event = events[i];
@@ -308,7 +318,7 @@ export class SynthEngineProcessor extends ProcessorBase {
       if (dryOutput[1]) dryOutput[1].set(new Float32Array(this.memory.buffer, this.outRPtr, frameCount));
       if (sendOutput?.[0]) sendOutput[0].set(new Float32Array(this.memory.buffer, this.sendLPtr, frameCount));
       if (sendOutput?.[1]) sendOutput[1].set(new Float32Array(this.memory.buffer, this.sendRPtr, frameCount));
-      this.renderFrame += frameCount;
+      this.renderFrame = blockStart + frameCount;
       this.reportTiming(nowMs() - started);
     } catch (error) {
       this.zero(outputs);

@@ -48,7 +48,7 @@ let liveContext;
 let liveSynth;
 let probeSynth;
 let probeNodes;
-const heldKeys = new Set();
+const heldKeys = new Map();
 const parameterValues = new Map();
 const touchedParameters = new Set();
 
@@ -226,12 +226,12 @@ async function playProbe(params, description) {
     const base = Math.ceil((liveContext.currentTime + 0.2) * liveContext.sampleRate);
     const interval = Math.round(0.65 * liveContext.sampleRate);
     const duration = Math.round(0.28 * liveContext.sampleRate);
-    synth.noteOn(60, 1, base);
-    synth.noteOff(60, base + duration);
-    synth.noteOnWith(60, 1, params, base + interval);
-    synth.noteOff(60, base + interval + duration);
-    synth.noteOn(60, 1, base + interval * 2);
-    synth.noteOff(60, base + interval * 2 + duration);
+    const first = synth.noteOn(60, 1, base);
+    synth.noteOff(first, base + duration);
+    const second = synth.noteOnWith(60, 1, params, base + interval);
+    synth.noteOff(second, base + interval + duration);
+    const third = synth.noteOn(60, 1, base + interval * 2);
+    synth.noteOff(third, base + interval * 2 + duration);
     setStatus(`${description} 同じ音を3回鳴らします。2音目を聴き比べてください。`);
     setTimeout(() => {
       setProbeButtonsDisabled(false);
@@ -251,24 +251,22 @@ function keyNote(event) {
 window.addEventListener("keydown", (event) => {
   const note = keyNote(event);
   if (note === null || event.repeat || heldKeys.has(event.code) || !liveSynth) return;
-  heldKeys.add(event.code);
-  liveSynth.noteOn(note, 0.8);
+  heldKeys.set(event.code, liveSynth.noteOn(note, 0.8));
   event.preventDefault();
 });
 
 window.addEventListener("keyup", (event) => {
   const note = keyNote(event);
-  if (note === null || !heldKeys.delete(event.code) || !liveSynth) return;
-  liveSynth.noteOff(note);
+  const handle = heldKeys.get(event.code);
+  if (note === null || handle === undefined || !liveSynth) return;
+  heldKeys.delete(event.code);
+  liveSynth.noteOff(handle);
   event.preventDefault();
 });
 
 window.addEventListener("blur", () => {
   if (!liveSynth) return;
-  for (const code of heldKeys) {
-    const match = /^Key([A-Z])$/.exec(code);
-    if (match) liveSynth.noteOff(60 + match[1].charCodeAt(0) - 65);
-  }
+  for (const handle of heldKeys.values()) liveSynth.noteOff(handle);
   heldKeys.clear();
 });
 

@@ -1190,13 +1190,17 @@ extern "C" int synth_process_send(SynthEngine* engine, const SynthEvent* events,
             if (events[e].offset == frame &&
                 (events[e].kind == SYNTH_EV_PARAM || events[e].kind == SYNTH_EV_MACRO))
                 apply_event_param(engine, events[e]);
+        // A VOICE_PARAM* -> NOTE_ON bundle is ordered by the caller.  Do not
+        // gather all overrides before all notes here: at one offset that would
+        // make the first NOTE_ON consume overrides intended for later notes.
         for (uint32_t e = 0; e < nEvents; ++e) {
-            if (events[e].offset == frame && events[e].kind == SYNTH_EV_VOICE_PARAM &&
-                !apply_voice_param(engine, events[e])) ++ignored;
-        }
-        for (uint32_t e = 0; e < nEvents; ++e)
-            if (events[e].offset == frame && events[e].kind == SYNTH_EV_NOTE_ON)
+            if (events[e].offset != frame) continue;
+            if (events[e].kind == SYNTH_EV_VOICE_PARAM) {
+                if (!apply_voice_param(engine, events[e])) ++ignored;
+            } else if (events[e].kind == SYNTH_EV_NOTE_ON) {
                 note_on(engine, events[e]);
+            }
+        }
 
         engine->filterCutoffSmoothed += engine->filterSmoothingCoefficient *
             (static_cast<double>(engine->params[kFilterCutoff]) - engine->filterCutoffSmoothed);
@@ -1335,4 +1339,4 @@ extern "C" uint32_t synth_get_tail_frames(const SynthEngine* engine) {
     return frames <= 0.0 ? 0u : static_cast<uint32_t>(frames + 0.999999);
 }
 
-extern "C" uint32_t synth_engine_version(void) { return 7; }
+extern "C" uint32_t synth_engine_version(void) { return 8; }

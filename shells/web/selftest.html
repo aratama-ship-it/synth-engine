@@ -171,8 +171,13 @@ document.getElementById("play").addEventListener("click", async (event) => {
     // ★バグ修正（2026-09-05）: noteOn の正しい引数順は (note, velocity, atFrame)。
     // 誤って (id, note, atFrame) の順で呼んでおり、MIDIノート番号「200」という
     // 範囲外の値で発音していたため実質無音だった（本人指摘で発覚）。
-    notes.forEach((note, index) => setTimeout(() => synth.noteOn(note, 1.0), index * 260));
-    notes.forEach((note, index) => setTimeout(() => synth.noteOff(note), 1600 + index * 60));
+    const noteHandles = [];
+    notes.forEach((note, index) => setTimeout(() => {
+      noteHandles[index] = synth.noteOn(note, 1.0);
+    }, index * 260));
+    notes.forEach((_note, index) => setTimeout(() => {
+      if (noteHandles[index]) synth.noteOff(noteHandles[index]);
+    }, 1600 + index * 60));
     setTimeout(() => { add("発音の指示", "3音を鳴らしました（聞こえましたか？）", "wait"); finish(); }, 2200);
   } catch (error) {
     add("実際に音を鳴らす", String(error), check(false)); finish();

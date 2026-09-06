@@ -57,10 +57,15 @@ DSPを意図して変更し、ゴールデンを更新する場合は次の順�
 空行と # 以降は無視します。イベントの frame は絶対フレームで、CLIがブロック内
 オフセットへ変換します。
 
+NOTE_ON/OFFの`id`はMIDI音高ではなく、発音インスタンスIDです。NOTE_ONの音高は`a`へ入れ、
+対応するNOTE_OFFだけが同じ`id`を使います。異なる`id`の同音は独立した発音として寿命を持ちます。
+Webの高水準APIはこのIDを不透明なNoteHandleで管理し、CLIや`sendEvents()`の低水準経路では呼び出し側が
+一意なIDを割り当てます。
+
 内蔵wavetableのslotは 0 basic（sine→triangle→saw→squareの4フレーム）、
 1 saw、2 square、3 triangleです。slot 0だけがmorphでフレーム間を移動します。
 
-## パラメータ一覧（engine version 7）
+## パラメータ一覧（engine version 8）
 
 | ID | 名前 | 範囲 | 既定 |
 |---:|---|---:|---:|
@@ -163,10 +168,11 @@ LFO Rateだけは全ボイス共通で、ボイス0のSource値を評価した�
 指定offsetから反映します。未知idは無視件数へ加算します。パラメータ73/74とイベントの
 どちらから設定しても5 ms時定数の一次スムーサを通り、create/reset時は目標値へスナップします。
 
-`SYNTH_EV_VOICE_PARAM`（kind 5）は、`id`でパラメータ、`a`で値を指定し、次に処理される
-NOTE_ONの1音だけへ適用します。同一offsetはNOTE_OFF、PARAM/MACRO、VOICE_PARAM、NOTE_ONの
-順で処理します。複数のVOICE_PARAMは1音へまとめて適用でき、NOTE_ONを1つ処理した時点で
-待機中の全上書きを消費します。NOTE_ONがないブロックでは次ブロックへ持ち越します。
+`SYNTH_EV_VOICE_PARAM`（kind 5）は、`id`でパラメータ、`a`で値を指定し、直後に処理される
+NOTE_ONの1音だけへ適用します。同一offsetはまずNOTE_OFF、PARAM/MACROを処理し、その後は
+入力配列順に`VOICE_PARAM* → NOTE_ON`の音符バンドルを処理します。複数のVOICE_PARAMは1音へ
+まとめて適用でき、NOTE_ONを1つ処理した時点で待機中の全上書きを消費します。NOTE_ONがない
+ブロックでは次ブロックへ持ち越します。
 値は通常パラメータと同じ範囲へクランプし、NaNまたは許可外IDは適用せず無視件数へ加算します。
 
 上書き許可IDは、1 oscAMorph、2 oscALevel、3 ampAttack、4 ampDecay、5 ampSustain、
@@ -251,7 +257,10 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 55. 2音目だけsendLevelを上書きしたとき、センドへその音だけが現れること
 56. VOICE_PARAMとセンド有効時のblock 1／7／64／128／511ビット一致、ブロック越しの
     待機上書き、およびreset後の再レンダー一致
-57. 16音×unison 4・LP24・6スロット・16ボイス上書き時の平均／p99処理時間と期限判定
+57. 同一offsetの3バンドル（sendLevel 0／0.5／1）を入力順・逆順とも音ごとに保持すること
+58. block末尾のVOICE_PARAMを次block先頭のNOTE_ONだけが消費すること
+59. 16音×unison 4・LP24・6スロット・16ボイス上書き時の平均／p99処理時間と期限判定
+60. 同じMIDI音高でも異なる発音IDなら個別にNOTE_OFFでき、block 1／7／64／128／511でPCM一致すること
 
 エイリアス測定は4-term Blackman-Harris窓を使い、基音電力に対する「基音より上、かつ
 期待される第1〜4倍音の各±10 binを除いた電力」の比です。MIDI 108では選択される
@@ -296,6 +305,19 @@ mipの倍音上限が4のため、この4倍音を期待成分とします。
 - センドはボイスのフィルタ後・アンプEG後から分岐し、マスターゲインを通さない
 - `synth_process`のシグネチャは維持し、`synth_process_send`へセンドNULLで委譲する
 
+## M3c-2で確定した事項
+
+- 同一offsetの`VOICE_PARAM* → NOTE_ON`は入力配列の順序を意味として保持する
+- 同時発音ごとの設定は正規APIの`noteOnWith()`で音符バンドルとして送る
+- `SynthEvent`の20 byte ABIとイベントkindは維持し、同時発音の意味変更に伴いengine versionは8とする
+
+## M3c-3で確定した事項
+
+- NOTE_ON/OFFの`id`は、MIDI音高ではなく32-bitの発音インスタンスIDである
+- Webの`noteOn()`／`noteOnWith()`は不透明なNoteHandleを返し、`noteOff(handle)`でだけ対応する発音を終了する
+- 数値MIDIを`noteOff()`へ渡す旧形式、別Nodeのhandle、ID再利用は拒否する
+- C ABIの20 byte `SynthEvent`、DSP、engine version 8は変更しない
+
 ## 未決事項
 
 SPECにないため、以下は公開仕様として確定していません。括弧内は現在の挙動です。
@@ -303,8 +325,6 @@ SPECにないため、以下は公開仕様として確定していません。�
 - 未知のイベントkindの扱い（音声変化なし）
 - 同じパラメータIDのVOICE_PARAMを1つのNOTE_ON前に複数受けた場合の優先規則
   （現在は処理順で最後の値を使う）
-- 同一offsetにNOTE_ONが複数ある場合、待機中VOICE_PARAMを受け取るNOTE_ONの選択規則
-  （現在は入力イベント配列で最初のNOTE_ONが受け取り、その時点で全上書きを消費する）
 - reset時の待機中VOICE_PARAMの保持規則
   （現在はSYNTH_RESET_VOICESとSYNTH_RESET_ALLのどちらでも待機中上書きを消去する）
 - ボイス上書きしたfilterCutoff/filterResonanceのスムージング規則

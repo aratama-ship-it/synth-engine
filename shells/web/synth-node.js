@@ -1,5 +1,6 @@
 const loadedContexts = new WeakSet();
 const PARAM_INFO_BYTES = 28;
+const MAX_NOTE_INSTANCE_ID = 0xffffffff;
 
 function exportedNumber(value, name) {
   const number = Number(value instanceof WebAssembly.Global ? value.value : value);
@@ -96,8 +97,10 @@ export async function createSynthNode(context, wasmBytes) {
     processorOptions: { wasmBytes },
   });
   let nextMessageId = 1;
+  let nextNoteInstanceId = 1;
   const waiters = new Map();
   const listeners = new Set();
+  const noteInstanceIds = new WeakMap();
 
   audioNode.port.addEventListener("message", (event) => {
     const message = event.data;
@@ -121,6 +124,24 @@ export async function createSynthNode(context, wasmBytes) {
     audioNode.port.postMessage({ type: "events", events });
   }
 
+  function createNoteHandle() {
+    if (nextNoteInstanceId > MAX_NOTE_INSTANCE_ID) {
+      throw new RangeError("note instance ID space is exhausted; create a new SynthNode");
+    }
+    const handle = Object.freeze({});
+    noteInstanceIds.set(handle, nextNoteInstanceId);
+    nextNoteInstanceId += 1;
+    return handle;
+  }
+
+  function noteInstanceId(handle) {
+    const id = noteInstanceIds.get(handle);
+    if (!Number.isSafeInteger(id)) {
+      throw new TypeError("noteOff expects a NoteHandle returned by this SynthNode");
+    }
+    return id;
+  }
+
   return {
     audioNode,
     get sendOutput() {
@@ -133,19 +154,23 @@ export async function createSynthNode(context, wasmBytes) {
       return audioNode.disconnect();
     },
     noteOn(note, velocity = 0.8, atFrame = defaultFrame(context)) {
-      postEvents([{ frame: atFrame, kind: 1, id: note, a: note, b: velocity }]);
+      const handle = createNoteHandle();
+      postEvents([{ frame: atFrame, kind: 1, id: noteInstanceId(handle), a: note, b: velocity }]);
+      return handle;
     },
-    noteOff(note, atFrame = defaultFrame(context)) {
-      postEvents([{ frame: atFrame, kind: 2, id: note, a: 0, b: 0 }]);
+    noteOff(handle, atFrame = defaultFrame(context)) {
+      postEvents([{ frame: atFrame, kind: 2, id: noteInstanceId(handle), a: 0, b: 0 }]);
     },
     voiceParam(params, atFrame = defaultFrame(context)) {
       audioNode.port.postMessage({ type: "voiceParam", params, frame: atFrame });
     },
     noteOnWith(note, velocity, params, atFrame) {
+      const handle = createNoteHandle();
       postEvents([
         ...params.map(([id, value]) => ({ frame: atFrame, kind: 5, id, a: value, b: 0 })),
-        { frame: atFrame, kind: 1, id: note, a: note, b: velocity },
+        { frame: atFrame, kind: 1, id: noteInstanceId(handle), a: note, b: velocity },
       ]);
+      return handle;
     },
     setParam(id, value) {
       audioNode.port.postMessage({ type: "preset", params: [[id, value]] });

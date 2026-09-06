@@ -2,9 +2,26 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { importSource } from "./load-module.mjs";
 
-const { AbsoluteEventRing, SynthEngineProcessor } = await importSource("../synth-worklet.js");
+const { AbsoluteEventRing, SynthEngineProcessor, audioContextFrame } = await importSource("../synth-worklet.js");
 
 const event = (frame, id) => ({ frame, kind: 1, id, a: 60 + id, b: 0.8 });
+
+function withCurrentFrame(frame, action) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "currentFrame");
+  Object.defineProperty(globalThis, "currentFrame", { configurable: true, value: frame });
+  try {
+    return action();
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "currentFrame", descriptor);
+    else delete globalThis.currentFrame;
+  }
+}
+
+test("Worklet prefers AudioContext currentFrame and falls back outside AudioWorklet", () => {
+  assert.equal(audioContextFrame(512), 512);
+  withCurrentFrame(4096, () => assert.equal(audioContextFrame(512), 4096));
+  withCurrentFrame(-1, () => assert.equal(audioContextFrame(512), 512));
+});
 
 test("Worklet ring converts absolute frames to block offsets and retains future events", () => {
   const ring = new AbsoluteEventRing(8);
@@ -30,20 +47,41 @@ test("Worklet ring preserves insertion order at the same offset", () => {
   assert.deepEqual(ring.takeBlock(0, 128).map(({ id }) => id), [3, 1, 2]);
 });
 
-test("Worklet converts voiceParam messages at the next block and orders them before NOTE_ON", () => {
+test("Worklet preserves same-frame VOICE_PARAM/NOTE_ON bundle order", () => {
   const processor = Object.create(SynthEngineProcessor.prototype);
   processor.ring = new AbsoluteEventRing(8);
   processor.renderFrame = 256;
-  processor.applyMessage({ type: "events", events: [event(256, 60)] });
-  processor.applyMessage({ type: "voiceParam", params: [[37, 4000], [75, 0.5]] });
+  processor.applyMessage({
+    type: "events",
+    events: [
+      event(256, 60),
+      { frame: 256, kind: 5, id: 37, a: 4000, b: 0 },
+      { frame: 256, kind: 5, id: 75, a: 0.5, b: 0 },
+      event(256, 67),
+    ],
+  });
 
   assert.deepEqual(
     processor.ring.takeBlock(256, 128).map(({ offset, kind, id, a, b }) => ({ offset, kind, id, a, b })),
     [
+      { offset: 0, kind: 1, id: 60, a: 120, b: 0.8 },
       { offset: 0, kind: 5, id: 37, a: 4000, b: 0 },
       { offset: 0, kind: 5, id: 75, a: 0.5, b: 0 },
-      { offset: 0, kind: 1, id: 60, a: 120, b: 0.8 },
+      { offset: 0, kind: 1, id: 67, a: 127, b: 0.8 },
     ],
+  );
+});
+
+test("Worklet uses AudioContext currentFrame for an implicit voiceParam frame", () => {
+  const processor = Object.create(SynthEngineProcessor.prototype);
+  processor.ring = new AbsoluteEventRing(4);
+  processor.renderFrame = 256;
+  withCurrentFrame(4096, () => {
+    processor.applyMessage({ type: "voiceParam", params: [[37, 4000]] });
+  });
+  assert.deepEqual(
+    processor.ring.takeBlock(4096, 128).map(({ offset, kind, id, a }) => ({ offset, kind, id, a })),
+    [{ offset: 0, kind: 5, id: 37, a: 4000 }],
   );
 });
 

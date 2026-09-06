@@ -26,13 +26,11 @@ const preset = [
 const noteEvents = [
   { frame: 0, kind: 1, id: 801, a: 60, b: 1 },
   { frame: 8192, kind: 2, id: 801, a: 0, b: 0 },
+  { frame: 8192, kind: 5, id: 37, a: 4000, b: 0 },
+  { frame: 8192, kind: 5, id: 75, a: 1, b: 0 },
   { frame: 8192, kind: 1, id: 802, a: 60, b: 1 },
   { frame: 16384, kind: 2, id: 802, a: 0, b: 0 },
   { frame: 16384, kind: 1, id: 803, a: 60, b: 1 },
-];
-const overrideEvents = [
-  { frame: 8192, kind: 5, id: 37, a: 4000, b: 0 },
-  { frame: 8192, kind: 5, id: 75, a: 1, b: 0 },
 ];
 
 function moduleArrayBuffer(bytes) {
@@ -80,11 +78,6 @@ async function renderWeb(wasmBytes) {
     await waitForProcessor(processor);
     processor.receive({ type: "preset", params: preset });
     processor.receive({ type: "events", events: noteEvents });
-    processor.receive({
-      type: "voiceParam",
-      frame: 8192,
-      params: [[37, 4000], [75, 1]],
-    });
 
     const dryLeft = new Float32Array(TOTAL_FRAMES);
     const dryRight = new Float32Array(TOTAL_FRAMES);
@@ -145,9 +138,7 @@ try {
   writeFileSync(presetPath, `${preset.map(([id, value]) => `${id}=${value}`).join("\n")}\n`);
   writeFileSync(
     eventsPath,
-    `${[...noteEvents, ...overrideEvents]
-      .sort((left, right) => (left.frame - right.frame) ||
-        (Number(right.kind === 5) - Number(left.kind === 5)))
+    `${noteEvents
       .map(({ frame, kind, id, a, b }) => `${frame} ${kind} ${id} ${a} ${b}`)
       .join("\n")}\n`,
   );
