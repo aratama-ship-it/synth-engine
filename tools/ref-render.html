@@ -54,21 +54,21 @@ function encodeWav(buffer) {
 const TIMBRES = ["epiano", "saw", "pluck", "bell"];
 const SR = 48000, SECONDS = 3, MIDI = 60, LENGTH = 1.5, VELOCITY = 1.0;
 
-async function renderTimbre(timbre) {
+async function renderTimbre(timbre, effect = "none") {
   const context = new OfflineAudioContext(2, SR * SECONDS, SR);
   // stem:"lead" にすると leadBus だけが出力へ回り、リバーブ・ディレイ・マスター処理を通らない＝ドライ音
   const synth = createSynth(context, { worldId: "daylight", scaleId: "ionian", bpm: 100, stem: "lead" });
-  synth.scheduleLead({ midi: MIDI, degree: 0 }, 0.05, LENGTH, VELOCITY, "none", 0, { timbre });
+  synth.scheduleLead({ midi: MIDI, degree: 0 }, 0.05, LENGTH, VELOCITY, effect, 0, { timbre });
   const rendered = await context.startRendering();
   const left = rendered.getChannelData(0);
   let peak = 0, nan = 0;
   for (let i = 0; i < left.length; i++) { const v = left[i]; if (!Number.isFinite(v)) nan++; else peak = Math.max(peak, Math.abs(v)); }
   const wav = encodeWav(rendered);
-  const response = await fetch(`/refwav?name=rsk_${timbre}`, { method: "POST", body: wav });
+  const response = await fetch(`/refwav?name=rsk_${timbre}${effect === "none" ? "" : "_" + effect}`, { method: "POST", body: wav });
   const saved = await response.json();
   const db = peak > 0 ? (20 * Math.log10(peak)).toFixed(1) : "-inf";
   const ok = peak > 0.001 && nan === 0 && saved.ok;
-  row(timbre, `ピーク ${db} dBFS / NaN ${nan} / 保存 ${saved.bytes?.toLocaleString?.() ?? "?"} バイト`, ok ? "ok" : "ng");
+  row(timbre + (effect === "none" ? "" : " / " + effect), `ピーク ${db} dBFS / NaN ${nan} / 保存 ${saved.bytes?.toLocaleString?.() ?? "?"} バイト`, ok ? "ok" : "ng");
   return ok;
 }
 
@@ -76,8 +76,10 @@ async function renderTimbre(timbre) {
   row("設定", `C4(MIDI ${MIDI}) を ${LENGTH}s・velocity ${VELOCITY}・エフェクトなし・tension 0 で ${SECONDS}s レンダー`);
   let allOk = true;
   for (const timbre of TIMBRES) {
-    try { allOk = (await renderTimbre(timbre)) && allOk; }
-    catch (error) { row(timbre, String(error), "ng"); allOk = false; }
+    for (const effect of ["none", "sweep"]) {
+      try { allOk = (await renderTimbre(timbre, effect)) && allOk; }
+      catch (error) { row(`${timbre} / ${effect}`, String(error), "ng"); allOk = false; }
+    }
   }
   row("結果", allOk ? "4音色すべて書き出し成功" : "失敗あり", allOk ? "ok" : "ng");
 })();
