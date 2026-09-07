@@ -1,9 +1,10 @@
-# Synth Engine M3a
+# Synth Engine M4n
 
 SPEC_M0a.md の縦切りスパイクに、SPEC_M1a.md のWT OSC A/B、ユニゾン、B→A位相変調、
 サブ、ノイズ、SPEC_M1b.mdのTPT/ZDF SVF、フィルタEG、LFO、
 SPEC_M1c.mdの6スロット・モジュレーションマトリクスとマクロ2本、および
-SPEC_M3a.mdの音符単位パラメータ上書きとセンド出力を追加した実装です。
+SPEC_M3a.mdの音符単位パラメータ上書きとセンド出力、SPEC_M4m.mdのMacro 3 / 4とMod EG、
+SPEC_M4n.mdの共有Insert FXを追加した実装です。
 第三者コードや外部ライブラリを含まず、DSPコアは
 C++標準ライブラリ、動的確保、例外、RTTI、ロックを使いません。公開面は
 core/include/synth_engine.h のC ABIです。
@@ -62,14 +63,15 @@ NOTE_ON/OFFの`id`はMIDI音高ではなく、発音インスタンスIDです�
 Webの高水準APIはこのIDを不透明なNoteHandleで管理し、CLIや`sendEvents()`の低水準経路では呼び出し側が
 一意なIDを割り当てます。
 
-内蔵wavetableのslotは 0 basic（sine→triangle→saw→squareの4フレーム）、
-1 saw、2 square、3 triangleです。slot 0だけがmorphでフレーム間を移動します。
+内蔵wavetableのslotは 0 Basic Shapes、1 Analog Sweep、2 Digital Edge、
+3 Hollow Formantです。全slotが4フレームを持ち、morphで隣接フレーム間を移動します。
+各slotのmorph 0は従来どおり sine / saw / square / triangleです。
 
-## パラメータ一覧（engine version 8）
+## パラメータ一覧（engine version 15）
 
 | ID | 名前 | 範囲 | 既定 |
 |---:|---|---:|---:|
-| 0 | oscAWavetable | 0..3 | 0 |
+| 0 | oscAWavetable | 0..3 int | 0 |
 | 1 | oscAMorph | 0..1 | 0 |
 | 2 | oscALevel | 0..4 | 0.8 |
 | 3 | ampAttack | 0..60 s | 0.005 |
@@ -84,7 +86,7 @@ Webの高水準APIはこのIDを不透明なNoteHandleで管理し、CLIや`send
 | 12 | oscAOctave | -2..2 int | 0 |
 | 13 | oscASemitone | -12..12 int | 0 |
 | 14 | oscAFine | -100..100 cent | 0 |
-| 15 | oscAPhaseMode | 0..1 int | 0 |
+| 15 | oscAPhaseMode | 0..2 int | 0 |
 | 16 | oscAPhase | 0..1 | 0 |
 | 17 | oscBWavetable | 0..3 int | 0 |
 | 18 | oscBMorph | 0..1 | 0 |
@@ -95,12 +97,12 @@ Webの高水準APIはこのIDを不透明なNoteHandleで管理し、CLIや`send
 | 23 | oscBOctave | -2..2 int | 0 |
 | 24 | oscBSemitone | -12..12 int | 0 |
 | 25 | oscBFine | -100..100 cent | 0 |
-| 26 | oscBPhaseMode | 0..1 int | 0 |
+| 26 | oscBPhaseMode | 0..2 int | 0 |
 | 27 | oscBPhase | 0..1 | 0 |
 | 28 | fmBToA | 0..1 | 0 |
 | 29 | subLevel | 0..4 | 0 |
 | 30 | subShape | 0..2 int | 0 |
-| 31 | subOctave | -2..0 int | -1 |
+| 31 | subOctave | -2..1 int | -1 |
 | 32 | noiseLevel | 0..4 | 0 |
 | 33 | noiseColor | 0..1 int | 0 |
 | 34 | noiseDecay | 0..60 s | 0.05 |
@@ -124,27 +126,64 @@ Webの高水準APIはこのIDを不透明なNoteHandleで管理し、CLIや`send
 | 52 | lfoPhase | 0..1 | 0 |
 | 53 | ampEgCurve | 0..1 | 0 |
 | 54 | filterEgCurve | 0..1 | 0 |
-| 55 | modSlot0Source | 0..7 int | 0 |
+| 55 | modSlot0Source | 0..11 int | 0 |
 | 56 | modSlot0Dest | 0..13 int | 0 |
 | 57 | modSlot0Amount | -1..1 | 0 |
-| 58 | modSlot1Source | 0..7 int | 0 |
+| 58 | modSlot1Source | 0..11 int | 0 |
 | 59 | modSlot1Dest | 0..13 int | 0 |
 | 60 | modSlot1Amount | -1..1 | 0 |
-| 61 | modSlot2Source | 0..7 int | 0 |
+| 61 | modSlot2Source | 0..11 int | 0 |
 | 62 | modSlot2Dest | 0..13 int | 0 |
 | 63 | modSlot2Amount | -1..1 | 0 |
-| 64 | modSlot3Source | 0..7 int | 0 |
+| 64 | modSlot3Source | 0..11 int | 0 |
 | 65 | modSlot3Dest | 0..13 int | 0 |
 | 66 | modSlot3Amount | -1..1 | 0 |
-| 67 | modSlot4Source | 0..7 int | 0 |
+| 67 | modSlot4Source | 0..11 int | 0 |
 | 68 | modSlot4Dest | 0..13 int | 0 |
 | 69 | modSlot4Amount | -1..1 | 0 |
-| 70 | modSlot5Source | 0..7 int | 0 |
+| 70 | modSlot5Source | 0..11 int | 0 |
 | 71 | modSlot5Dest | 0..13 int | 0 |
 | 72 | modSlot5Amount | -1..1 | 0 |
 | 73 | macro1 | 0..1 | 0 |
 | 74 | macro2 | 0..1 | 0 |
 | 75 | sendLevel | 0..1 | 0 |
+| 76 | oscAWidthCurve | 0..1 int | 0 |
+| 77 | oscBWidthCurve | 0..1 int | 0 |
+| 78 | fmQuality | 0..1 int | 0 |
+| 79 | lfo2Rate | 0.01..40 Hz | 0.25 |
+| 80 | lfo2Shape | 0..5 int | 1 |
+| 81 | lfo2Retrigger | 0..1 int | 0 |
+| 82 | lfo2Phase | 0..1 | 0.25 |
+| 83 | macro3 | 0..1 | 0 |
+| 84 | macro4 | 0..1 | 0 |
+| 85 | modEgAttack | 0..20 s | 0.005 |
+| 86 | modEgDecay | 0..20 s | 0.2 |
+| 87 | modEgSustain | 0..1 | 0 |
+| 88 | modEgRelease | 0..20 s | 0.2 |
+| 89 | modEgCurve | 0..1 | 0 |
+| 90 | distortionOn | 0..1 int | 0 |
+| 91 | distortionDrive | 0..1 | 0.28 |
+| 92 | distortionTone | 800..18000 Hz | 12000 |
+| 93 | distortionMix | 0..1 | 0.48 |
+| 94 | chorusOn | 0..1 int | 0 |
+| 95 | chorusRate | 0.05..5 Hz | 0.32 |
+| 96 | chorusDepth | 0..1 | 0.45 |
+| 97 | chorusWidth | 0..1 | 0.8 |
+| 98 | chorusMix | 0..0.65 | 0.32 |
+| 99 | eqOn | 0..1 int | 0 |
+| 100 | eqLow | -18..18 dB | 0 |
+| 101 | eqMid | -18..18 dB | 0 |
+| 102 | eqHigh | -18..18 dB | 0 |
+| 103 | compressorOn | 0..1 int | 0 |
+| 104 | compressorThreshold | -60..0 dB | -18 |
+| 105 | compressorRatio | 1..20 | 3 |
+| 106 | compressorAttack | 0.001..0.2 s | 0.012 |
+| 107 | compressorRelease | 0.03..1 s | 0.22 |
+| 108 | compressorMakeup | 0..12 dB | 1 |
+| 109 | insertOrder1 | 0..3 int | 0 |
+| 110 | insertOrder2 | 0..3 int | 1 |
+| 111 | insertOrder3 | 0..3 int | 2 |
+| 112 | insertOrder4 | 0..3 int | 3 |
 
 filterModeは0=LP12、1=BP12、2=HP12、3=Notch、4=LP24、5=HP24です。
 lfoShapeは0=sine、1=triangle、2=saw上行、3=saw下行、4=square、5=S&Hです。
@@ -154,8 +193,8 @@ ampEgCurveとfilterEgCurveは、各EGのディケイ／リリースに共通し�
 curve>0では進行度を経過サンプル数から求め、ディケイ／リリースの区間長は指定秒ちょうど
 （端数がある場合は目標へ到達する最初のサンプル）になります。
 
-モジュレーションのSourceは0=なし、1=LFO、2=アンプEG、3=フィルタEG、4=ベロシティ、
-5=ノート位置、6=macro1、7=macro2です。ノート位置は`(midiNote - 60) / 60`を
+モジュレーションのSourceは0=なし、1=LFO 1、2=アンプEG、3=フィルタEG、4=ベロシティ、
+5=ノート位置、6=macro1、7=macro2、8=LFO 2、9=macro3、10=macro4、11=Mod EGです。ノート位置は`(midiNote - 60) / 60`を
 -1..1へクランプします。Destinationは0=なし、1=Osc A Level、2=Osc B Level、
 3=Osc A Morph、4=Osc B Morph、5=FM B→A、6=Sub Level、7=Noise Level、
 8=Filter Cutoff、9=Filter Resonance、10=全オシレータPitch、11=Osc A Detune、
@@ -163,10 +202,11 @@ curve>0では進行度を経過サンプル数から求め、ディケイ／リ�
 1、1200 cent、50 cent、8 octave、1です。
 
 同じDestinationへの寄与は6スロット分を合算してから1回だけクランプします。
-LFO Rateだけは全ボイス共通で、ボイス0のSource値を評価した結果を使います。
-`SYNTH_EV_MACRO`はid 0/1をmacro1/2へ割り当て、`a`を0..1へクランプし、
+Destination 12のLFO 1 Rateだけは全ボイス共通で、ボイス0のSource値を評価した結果を使います。
+`SYNTH_EV_MACRO`はid 0〜3をmacro1〜4へ割り当て、`a`を0..1へクランプし、
 指定offsetから反映します。未知idは無視件数へ加算します。パラメータ73/74とイベントの
-どちらから設定しても5 ms時定数の一次スムーサを通り、create/reset時は目標値へスナップします。
+どちらから設定しても5 ms時定数の一次スムーサを通り、macro3/4はパラメータ83/84を使います。
+create/reset時は目標値へスナップします。
 
 `SYNTH_EV_VOICE_PARAM`（kind 5）は、`id`でパラメータ、`a`で値を指定し、直後に処理される
 NOTE_ONの1音だけへ適用します。同一offsetはまずNOTE_OFF、PARAM/MACROを処理し、その後は
@@ -196,7 +236,7 @@ WASM_CLANG が未設定なら成功扱いでskipを表示します。LLVM clang�
 
     WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang make wasm
 
-## テスト57項目
+## テスト71項目
 
 tests/test_main.cpp はフレームワークを使わず、次を測定します。
 
@@ -218,7 +258,7 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 16. サブの周波数ピーク
 17. ノイズ減衰とseed決定論
 18. 100 Hz〜10 kHzのピンクノイズ傾斜
-19. 全76パラメータのmin/default/maxスイープ
+19. 全113パラメータのmin/default/maxスイープ
 20. 16音・両OSC 4 unison・サブ・ノイズの処理時間
 21. M1a全構成のblock 1/7/64/128/511ビット一致
 22. M0 saw／M1 unisonのゴールデンハッシュ一致
@@ -234,7 +274,7 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 32. フィルタ＋LFO有効時のblock 1/7/64/128/511ビット一致
 33. 全M1b機能有効時のreset後レンダー決定論
 34. LP24・LFO・16音×unison 4の平均／p99処理時間と期限判定
-35. curve=0を明示したM0 saw／M1 unisonのゴールデンハッシュ一致、および76パラメータのメタデータ
+35. curve=0を明示したM0 saw／M1 unisonのゴールデンハッシュ一致、および113パラメータのメタデータ
 36. 直線フィルタEGのディケイ25%／50%／75%時点での実測値
 37. curve 0／0.5／1でエンベロープが0.5へ落ちる時刻の単調増加
 38. curve、decay、releaseの全80組合せでNaN／Inf、振幅上限、リリース後のボイス解放
@@ -242,7 +282,7 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 40. 同じ演奏のイベントIDだけを変更したM1 unison／M1b filter sweepのビット一致
 41. M1 unisonの変更前後におけるRMS差1 dB以内／スペクトル重心差10%以内
 42. 全スロット無効時のM0 saw／M1 unison／M1b filter sweepとG4ゴールデンハッシュの一致
-43. LFO／アンプEG／フィルタEG／ベロシティ／ノート位置／macro1／macro2の7信号源
+43. LFO 1／アンプEG／フィルタEG／ベロシティ／ノート位置／macro1〜4／LFO 2／Mod EGの11信号源
 44. 13送り先それぞれのRMS差1 dB以上またはスペクトル重心差5%以上
 45. Filter Cutoffへ同量を2スロットから送ったときの変化幅が1スロット時の2倍±20%
 46. frame 24000のmacroイベント、5 msスムーサ、未知macro idの無視件数
@@ -261,6 +301,17 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 58. block末尾のVOICE_PARAMを次block先頭のNOTE_ONだけが消費すること
 59. 16音×unison 4・LP24・6スロット・16ボイス上書き時の平均／p99処理時間と期限判定
 60. 同じMIDI音高でも異なる発音IDなら個別にNOTE_OFFでき、block 1／7／64／128／511でPCM一致すること
+61. 内蔵4 wavetableが各4 frame・全値finiteで、slot 1〜3の終端音色が先頭と十分に異なり、peakが一致すること
+62. sawのmip境界直前／直後で、100 cent smoothstep crossfadeがhard switchより20 dB以上段差を減らし、遷移外では既存readerとビット一致すること
+63. Morph A/B、Level A/B、Master、FM、Sub、Noiseの8操作が発音中は5 msで平滑化され、idle設定時は目標値へスナップすること
+64. unison 1〜4声のdetune／pan配置が左右対称・平均0で、4声時にdetune `-1/-0.2/+0.2/+1`と等間隔panを分離すること
+65. Balanced位相が4声を中心へ対称配置し、Natural Widthが端点を保ちながら中間値を広げること
+66. FM High Guardが低音の出力を維持し、高音の折返し成分を20 dB以上減らすこと
+67. LFO 1 / LFO 2のglobal位相が独立速度で進み、LFO 2のS&H乱数列とノート別retriggerが独立すること
+68. Mod EGのADSR、curve、note-off releaseと、Mod EGだけでボイス寿命を延長しないこと
+69. 4 Insertそれぞれのfinite出力と変化、順序差、重複／不正順序の既定順フォールバック
+70. 4 Insert有効時のblock 1／128一致、reset履歴消去、Chorus 22 msを含むtail frames
+71. 6スロット・LP24・16音×unison 4・全Insert有効時の平均／p99処理時間と期限判定
 
 エイリアス測定は4-term Blackman-Harris窓を使い、基音電力に対する「基音より上、かつ
 期待される第1〜4倍音の各±10 binを除いた電力」の比です。MIDI 108では選択される
@@ -269,7 +320,7 @@ mipの倍音上限が4のため、この4倍音を期待成分とします。
 ## M1aで確定した事項
 
 - wavetableは4 slot、1 slotあたり最大4 frame
-- slot 0のmorphは隣接2フレームの線形補間
+- morphは隣接2フレームの線形補間
 - ユニゾンは等電力パン、合計ゲインは1/sqrt(U)
 - B→A位相変調は全開で2 cycle
 - ピンクノイズは20 Hz / 200 Hz / 2 kHzの1極LPFを1.0 / 0.32 / 0.10で加算
@@ -318,6 +369,59 @@ mipの倍音上限が4のため、この4倍音を期待成分とします。
 - 数値MIDIを`noteOff()`へ渡す旧形式、別Nodeのhandle、ID再利用は拒否する
 - C ABIの20 byte `SynthEvent`、DSP、engine version 8は変更しない
 
+## M4aで確定した事項
+
+- 内蔵4 slotはすべて4 frameとし、Basic Shapes / Analog Sweep / Digital Edge / Hollow Formantとして公開する
+- 各slotのframe 0は従来のsine / saw / square / triangle生成式を維持する
+- slot 1〜3の追加frameは高調波係数から非RT初期化時に生成し、frame 0とpeakを揃える
+- C ABIとパラメータ76個は維持する。OSC A/Bのslot selectorはともに整数とし、内蔵wavetableの意味変更に伴いengine versionは9とする
+
+## M4fで確定した事項
+
+- 周波数から選んだalias-safeなprimary mipが安全になった境界から100 centだけ、次の制限mipからprimaryへsmoothstepでクロスフェードする
+- richer mipは全倍音がNyquist内へ入るまで読まない。遷移外はprimary mipを1回だけ読み、従来出力とビット一致する
+- Osc A / Osc B / B→A位相変調源 / Subの全render pathへ同じreaderを使う
+- C ABIとパラメータ76個は維持し、PCM意味変更に伴いengine versionは10とする
+
+## M4gで確定した事項
+
+- Osc A/B Morph、Osc A/B Level、B→A FM、Sub Level、Noise Level、Master Gainのグローバル操作値は5 msの一次スムーサを通す
+- idle時のパラメータ設定とcreate/resetでは目標値へスナップし、プリセット読込後の初音に不要な立ち上がりを作らない
+- ノート単位のVOICE_PARAM上書きは即時値を使い、Matrix/LFOの寄与は平滑化後のbaseへ加算して意図した変調速度を維持する
+- unisonのpanは等間隔、detuneは4声時だけ`-1/-0.2/+0.2/+1`とし、外側の広がりと内側の音程の芯を分担する
+- 合計ゲインは従来どおり`1/sqrt(U)`、panは等電力とする。C ABIとパラメータ76個は維持し、engine versionは11とする
+
+## M4hで確定した事項
+
+- Osc A/BのPhase ModeへBalancedを追加し、4声を中心位相の周囲へ対称配置する
+- Osc A/BのWidth CurveはLinear / Naturalを独立選択し、Naturalは0%と100%の端点を維持する
+- FM QualityはLegacy / HQ Guardを選択し、HQ Guardは高音域だけFM depthを連続的に抑える
+- 既存IDは維持し、パラメータ76〜78を末尾追加する。engine versionは12とする
+
+## M4lで確定した事項
+
+- LFO 2はLFO 1と独立したrate / shape / retrigger / phaseと、別のS&Hハッシュ層を持つ
+- LFO 2は既存6-slot MatrixのSource 8として追加し、LFO 1のcutoff / pitch / amp直結経路は複製しない
+- LFO 1 / LFO 2はfree-run時に別々のengine共通位相、retrigger時に別々のvoice位相を使う
+- 既存IDとC ABIは維持し、パラメータ79〜82を末尾追加する。engine versionは13とする
+- LFO 2を使わない全18プリセットはnative / WASMでサンプル単位のビット一致を維持する
+
+## M4mで確定した事項
+
+- Macro 3 / 4は既存Macroと同じ5 ms一次スムーサを通り、`SYNTH_EV_MACRO` id 2/3からも操作できる
+- Mod EGはアンプ／フィルタEGと独立したADSR / Curveを持ち、既存MatrixのSource 11としてだけ接続する
+- Matrix Sourceは既存番号を維持したままMacro 3=9、Macro 4=10、Mod EG=11を末尾追加する
+- 既存IDとC ABIは維持し、パラメータ83〜89を末尾追加する。engine versionは14とする
+
+## M4nで確定した事項
+
+- Distortion / Chorus / 3-band EQ / Compressorは共有C++コアで処理し、WebとAUが同じパラメータ／順序を使う
+- Delay / ReverbはWeb専用の軽い後段空間系として維持し、共有コアには含めない
+- 4 Insertは初期BYPASSで既存ゴールデンをビット一致させ、wet／bypassを平滑化する
+- 順序指定に重複または範囲外があればDistortion → Chorus → EQ → Compressorへフォールバックする
+- 既存IDとC ABIは維持し、パラメータ90〜112を末尾追加する。engine versionは15とする
+- Chorus有効時は最大22 msを`synth_get_tail_frames`へ追加する
+
 ## 未決事項
 
 SPECにないため、以下は公開仕様として確定していません。括弧内は現在の挙動です。
@@ -333,7 +437,7 @@ SPECにないため、以下は公開仕様として確定していません。�
   （現在は非NULL側だけを書き、NULL側を破棄する）
 - sendLevelのパラメータflags（現在はゲイン量として`SYNTH_PARAM_FLAG_GAIN`を付ける）
 - ボイス上書きしたampReleaseと`synth_get_tail_frames`の関係
-  （現在は従来どおりグローバルampReleaseだけからtail framesを返す）
+  （現在はグローバルampReleaseに、Chorus有効時だけ最大22 msを加えてtail framesを返す）
 - OSC Aが1 unisonかつM1a音源がすべて無効なときのphaseMode=0は、M0aビット互換のため
   0.25 cycle開始を維持する。ユニゾン使用時は経路非依存なstartOrderを使ったhash開始とする
 - 発音中にunison数、phaseMode、固定phaseを変更した場合の位相再初期化規則
@@ -342,7 +446,6 @@ SPECにないため、以下は公開仕様として確定していません。�
   （現在はnoiseLevel=0の間はLPFを更新しない）
 - ノイズのsampleIndexが2^32 sampleを越えた後のhash規則
   （現在はhash入力の下位32 bitを使う）
-- mip段の境界補間（周波数から1段を選ぶhard switch）
 - ADSR、level、gain、wavetable slotの初期値（コード内のM0a初期値）
 - SYNTH_RESET_VOICES と SYNTH_RESET_ALL のパラメータ保持範囲
   （VOICESはパラメータ保持、ALLはM0a初期値へ戻す）

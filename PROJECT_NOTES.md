@@ -33,10 +33,10 @@ Serumの全機能再現は目的ではない。「Serum型の構成で、今あ�
 - **C ABI**: イベント一括投入型 `synth_process(events[], n, outL, outR, nFrames)`。イベントはブロック内オフセット、
   絶対フレームは殻側。同一サンプルの順序は noteOff → param → noteOn。state は `PatchState`（プリセット・AU保存）と
   `RuntimeCheckpoint`（ボイス位相・EG・FX・RNG。オフライン再開専用）に分ける。ログ再生は必ず reset から
-- **音源構成（MVP）**: WT OSC A/B（モーフ、ユニゾン≤4、BがAをFM/PM）＋サブ＋ノイズ、SVF×1、EG×2、LFO×1、
-  モジュレーション6スロット、マクロ×2（1つは random-scale-keys の緊張度T）、16音固定・voice stealing・CC64・平滑化。
-  FX（サチュレーション/ディレイ/小型リバーブ）は**ボイスエンジンと分離**。ドライ出力とFXセンド出力を別に持つ
-- **「同じ音」の境界**: Web と AU で一致させるのは**ドライPCMまで**。Web側は既存バス（主リバーブ200Hz HP・SFX部屋・コンプ）を使う
+- **音源構成（M4n現在）**: WT OSC A/B（モーフ、ユニゾン≤4、BがAをFM/PM）＋サブ＋ノイズ、SVF×1、EG×3、LFO×2、
+  モジュレーション6スロット、マクロ×4、16音固定・voice stealing・CC64・平滑化。Distortion / Chorus / 3-band EQ /
+  Compressorはボイス後の共有コアInsert、Delay / ReverbはWeb専用後段。ドライ出力とFXセンド出力は引き続き別に持つ
+- **「同じ音」の境界**: Web と AU で一致させるのは**共有Insertを含むコアPCMまで**。Delay / ReverbはWeb側だけに置く
 - **プリセットJSON**: schemaVersion / engineVersion / 安定param id / WTハッシュ。random-scale-keys のイベントログに同梱
 - **ウェーブテーブル**: 内蔵（基本波形＋生成物）のみ同梱。Serum互換WAVインポートは後段の隔離モジュール。素材は再配布しない
 
@@ -282,6 +282,61 @@ C++ CLIレンダラー（プリセット＋イベントJSON → WAV）を基準�
 
 - **2026-09-07 Web Synth 残響の質感追加（ローカル・非公開）**。
   SPACEへ`MATERIAL`（CLEAR / WARM / GRAIN）を追加。各選択は畳み込みインパルスの長さ・減衰・密度、残響バスのローパス周波数、プリディレイを同時に変える。CLEARは既存の明るい密な残響に近く、WARMは高域を抑えた長い残響、GRAINは短く疎らな反射である。Studio 6音色に素材ごとの初期値を設定し、MATERIAL選択後はPC鍵盤の入力に戻れるようselectをblurする。コアDSP/C ABI/WASMには変更なし。聴感は本人確認待ち。
+
+- **2026-09-07 Web Synth Studio shell（ローカル・非公開）**。
+  Serum系の役割分割を参照しつつ、SynthEngineの実体に合わせて`OSC / FX / MATRIX`の3作業面へ再構成した。A/B対称OSC、実パラメータから描く波形・ENV・LFO設定図、8 source / 14 destination / 6 slotの名前付きMatrix、Macroから対象への割当てを実装。FXはdry出力を起点に、順序変更可能なDistortion / Chorus / 3-band EQ / Compressorのinsert、その後のdry + Delay + Reverb並列へ変更。Delayは初期BYPASS、Reverbは独立ONで9値を持ち、密なstereo IRと二重Convolver crossfadeにした。全core / space / insert / orderをschemaVersion 1のパッチとして扱い、最大8件保存、自動復元、検索／カテゴリ、Undo / Redo、JSON入出力を追加した。Webテスト30/30、design-lintは3画面×390/1280/1440pxでNG 0/WARN 0。core/C ABI/WASM、AU、スタンドアロン、random-scale-keysは変更していない。聴感とSafari／タッチ実機は本人確認待ち。
+
+- **2026-09-07 プリセット試奏時間とReverb明度の本人フィードバック反映（ローカル・非公開）**。
+  10個のWeb SynthプリセットでAMP Sustainを0〜25%、AMP Releaseを約25〜32%短縮し、プリセット固有のReverb Decayも1.0〜3.4秒へ短縮した。比較中に前の音が残り続けないことを優先し、Wide PadとGlass Bellの個性は残す。既存WARMの暗さは保持し、これより暗い素材は増やさず、high-cut 18 kHz・decay 2.2秒のBRIGHTを対照素材として追加した。
+
+- **2026-09-07 Web Synth Reverb DAMPING追加（ローカル・非公開）**。
+  HIGH CUTとは別に、残響の高域が尾の中で失われる速さを0〜100%で変えるDAMPINGを追加した。0%は高域と低域を同じ減衰率、100%は従来の高域減衰率とし、WARMを含む既存素材を従来より暗くしない。BRIGHTだけ18%、CLEAR / WARM / GRAINは100%で開始する。既存IR生成の係数・debounce・二重Convolver crossfadeを再利用し、AudioNodeと常時処理は追加していない。Web 32/32、core 60/60、design-lint 390/1440pxはNG 0/WARN 0。48 kHz・Decay 3.8秒のIR生成12回はNode上で中央値13.35 ms、最大30.58 ms（ブラウザ実時間ではなくローカルNode測定）。
+
+- **2026-09-07 M4a 内蔵Wavetable Palette追加（ローカル・非公開）**。
+  Reverbは現行の軽い並列FXで一旦固定し、OSC側の4 slotをBasic Shapes / Analog Sweep / Digital Edge / Hollow Formantへ整理した。全slotを4 frame化し、これまでslot 1〜3で実質無効だったPOSに連続した音色変化を与えた。各slotの0%は従来のSine / Saw / Square / Triangle生成式を維持し、旧Sine / Sawゴールデンはビット一致。追加frameは10段mipmapを初期化時に生成し、音声処理ループ・C ABI・76パラメータは不変。OSC A/Bのslot selectorはともに整数へ揃え、engine versionは9。core 61/61、Web 33/33、freestanding、WASM/CLIビット一致、design-lint 390/1440pxでNG 0/WARN 0。WASMは53,751 B（gzip 15,997 B）、native初期化＋1frame renderはウォーム後約0.05秒。ブラウザではHollow FormantのPOS 0→100%で設定図が変わり、C4発音経路まで確認。最終的な各テーブルの質感は本人試聴待ち。仕様は`SPEC_M4a.md`。
+
+- **2026-09-07 M4b Reference Match測定基盤追加（ローカル・非公開）**。
+  最終目標を「参照音を測る→編集可能な候補パッチ→音量を揃えたA/B→手動補正」と定義し、最初の垂直スライスとしてStudio画面へ4つ目の`MATCH`タブを追加した。音声はWeb Audioでブラウザ内だけで復号し、外部送信・永続保存・自動パッチ変更は行わない。長さ、peak/RMS、active区間、10–90% attack、単音pitch/confidence、微分ベースbrightness、mid/side width、20ms RMS包絡と入力品質警告を表示する。M2で耳ゲートまで使った包絡・重心・相関を`shells/web/sound-analysis.js`へ共有化し、`tools/compare-timbre.mjs`も同じ定義へ切り替えた。`tools/analyze-sound.mjs`からFloat32 WAVをJSON測定できる。既存4参照音はすべてC4を261.5〜261.9 Hz、confidence 96.9〜99.8%で検出。合成440 Hzとattack/stereo/quiet入力を含むWeb 38/38、core 61/61、freestanding PASS。実Chromiumで`rsk_epiano.wav`を読み込み、261.6 Hz / 100% / attack 20 ms / brightness 315 Hz、page error 0、presetがepianoのまま変わらないことを確認。design-lintは390×844 / 1440×900でNG 0/WARN 0。自動候補生成と候補音のオフラインA/Bは次段階。仕様は`SPEC_M4b.md`。
+
+- **2026-09-07 M4c Reference Match音量補正A/B追加（ローカル・非公開）**。
+  参照音のpitch confidenceが70%以上なら、現在の76 core値だけをOfflineAudioContextへ複製し、最寄りMIDI note、先頭無音、active end、現在のAmp Releaseからnote-on/offを決めて最大12秒描画する。候補は`CORE DRY`でInsert / Delay / Reverbを含めず、パッチ本体は変更しない。参照と候補をactive RMS −18 dBFS、peak ceiling −1 dBFSへ別々に補正し、A REFERENCE / B CURRENT / STOPで相互排他的に再生する。包絡相関、pitch cents差、attack差、brightness差をB−Aで表示し、core変更時は旧候補を即無効化する。`rsk_epiano.wav`と復元済みSawで3秒描画し、envelope 0.836 / pitch −0.7 ct / attack −20 ms / brightness +115.5%、A→B→STOP、変更時の無効化、page error 0を実ブラウザで確認。Web 44/44、core 61/61、freestanding PASS、旧M2同一WAV比較OK。design-lintは390×844 / 1440×900でNG 0/WARN 0。Safari、タッチ端末、主観的な音色一致は未確認。仕様は`SPEC_M4c.md`。
+
+- **2026-09-07 M4d Reference Match AMP ENV仮説追加（ローカル・非公開）**。
+  20 ms RMS包絡の10–90%立ち上がりとpeak後の安定区間から、AMP Attack / Decay / Sustainの編集候補を作る。Releaseは安定区間後かつ末尾20%内の、音量が戻らないtail dropを検出できた場合だけ提案し、自然減衰や周期変動と分離できなければ`KEEP CURRENT`とする。画面は`CURRENT → SUGGESTED`、値ごとのconfidenceと根拠、READY / PARTIAL / UNAVAILABLE / APPLIEDを表示し、読込時はパッチを変更しない。`APPLY DETECTED`で有限な候補だけを既存Undoへ一手として適用し、古いA/B候補を無効化する。実Chromiumで`rsk_epiano.wav`のREADY→APPLIED→Undo→READY→再適用→RENDER→A/Bを完走し、390pxで横あふれ0、page error 0。4基準音ではEPianoのみReleaseを検出し、Saw / Pluck / Bellは保守的に保持した。Web 48/48、core 61/61、freestanding PASS。design-lintは390×844 / 1440×900でNG 0/WARN 0。推定値の主観的な妥当性、Safari、タッチ端末は未確認。仕様は`SPEC_M4d.md`。
+
+- **2026-09-07 M4e Reference Match Filter Cutoff較正追加（ローカル・非公開）**。
+  BrightnessをCutoff値へ直接変換せず、Filter ONかつLP12 / LP24のときだけ、現在のcore dryとCutoffを必要方向へ×2または×0.5した分析専用probeを同じ音程・長さで最大1回描画し、局所的なBrightness応答からCutoff候補を推定する。反応が逆、2.5%未満、範囲端、非LP、BYPASSでは`KEEP CURRENT`へ倒し、提案も現在値の×0.25〜×4へ制限する。`APPLY CUTOFF`はCutoffだけを既存Undoへ一手として適用し、Filter ON / Mode / Resonance / EGを保持して古いA/Bを無効化する。実ChromiumでSaw 1,200 Hzと`rsk_epiano.wav`を比較し、Reference 315 Hz / Current 680 Hz / 600 Hz probe 470 HzからLOW・一手制限付き300 Hz候補を表示、READY→APPLIED→Undo→WAITINGと1,200 Hz復帰を確認した。390pxで横あふれ0、操作高44px、page error 0。Web 52/52、core 61/61、freestanding PASS。design-lintは390×844 / 1440×900でNG 0/WARN 0。候補値の主観的な妥当性、Safari、タッチ端末は未確認。仕様は`SPEC_M4e.md`。
+
+- **2026-09-07 M4f Wavetable mip境界crossfade追加（ローカル・非公開）**。
+  自動探索より先にシンセ本体の生成品質を上げる方針へ切り替えた最初の項目。従来は周波数からalias-safeなmipを1段だけ選ぶhard switchだったため、Osc A / Osc B / B→A位相変調源 / Subの全経路で、richer mipが安全になった境界から100 centだけ次の制限mip→primary mipをsmoothstepで補間する。richer mipはNyquist条件を満たす前に読まず、遷移外は従来readerとビット一致する。48 kHz・750 Hz境界のsawで最大サンプル段差を0.412318826から測定限界上0へ低減し、遷移外ビット一致。alias −96.23 dB、FM alias −94.32 dBを維持した。core 62/62、freestanding PASS、8プリセットのnative/WASMは全てビット一致。6 slot・LP24・16音×unison4は平均300.29 µs / p99 379.96 µsでhalf deadline 1333.5 µs以内。C ABIと76パラメータは不変、engine version 10、WASM 54,521 B（gzip 16,321 B）。聴感上の改善は本人確認待ち。仕様は`SPEC_M4f.md`。
+- **2026-09-07 M4g 操作スムージング＋unison配置改善（ローカル・非公開）**。
+  Osc A/B Morph、Osc A/B Level、B→A FM、Sub Level、Noise Level、Master Gainの手動base値へ5 ms一次スムーサを追加した。発音中だけ追従させ、idleでのpreset読込とcreate/resetは目標値へスナップする。VOICE_PARAMはnote startの即時値、Matrix/LFOは平滑化後baseへの加算として変調の速さを維持する。unisonは声数1〜4と`1/sqrt(U)`正規化を維持し、panの等間隔配置とdetune配置を分離。4声detuneを`-1/-0.2/+0.2/+1`として内側の音程の芯を残す。実測は2/3/4声RMSが1声比+0.04/+0.43/+0.38 dB、4声full widthの左右差0.006 dB・相関0.455、width 0は左右ビット一致。8操作の初回追従率0.004158、50 ms後の最大残差0.0000363。core 64/64、Web 52/52、freestanding PASS、8プリセットnative/WASM全てビット一致。6 slot・LP24・16音×unison4は平均288.44 µs / p99 361.38 µsでhalf deadline 1333.5 µs以内。C ABIと76パラメータは不変、engine version 11、WASM 56,191 B（gzip 16,730 B）。聴感の最終判定は本人確認待ち。仕様は`SPEC_M4g.md`。
+
+- **2026-09-07 M4i Quality Lab通常画面分離（ローカル・非公開）**。
+  本人のユニゾン／FM比較完了後、OSC上部の検証パネルを通常URLでは`hidden`にし、日常の音作りをOSCILLATOR A/Bから開始できるようにした。比較機能、4ボタン、状態文、品質パラメータ、DSP、プリセット値は削除・変更せず、`?quality=1`の明示的な検証URLで従来どおり復帰する。Web 53/53 PASS。design-lintは390×844 / 1440×900でNG 0／WARN 0／測定不可0、44px未満0件（通常画面100操作）。実ブラウザで通常URLのLab非表示、OSC A表示、検証URLで4ボタン復帰、通常URLへの復帰を確認した。Safariとタッチ端末は未確認。仕様は`SPEC_M4i.md`。
+
+- **2026-09-07 M4j Web初回出力／鳴り止め安全化（ローカル・非公開）**。
+  AudioContext停止中にもWeb FXのAudioParamを`setTargetAtTime`で予約していたため、再開直後だけBYPASS中の4 Insertでdry/wetが各unityから減衰し、理論上最大16倍に重なる経路があった。Delay入力とfeedbackも初期値unityから下がるため、過大な初回音が残響へ流れ込む構造だった。停止中は各値を即時設定し、最終出力を0から25 msで開く安全ゲートを追加。画面鍵盤をpointer ID単位にし、capture喪失、blur、pagehide、visibility hiddenでは待機／発音を消去、voice reset、出力muteを行う。Web 56/56 PASS。実Chromiumで更新後の初期状態、最初の画面鍵盤操作によるAudio開始、700 ms後にactive key 0を確認した。DSPコア、パラメータ、プリセット、AU、スタンドアロンは変更していない。爆発音と鳴り残りが消えたかの最終判定は本人の耳で確認待ち。
+
+- **2026-09-07 M4k Web Reverbゲイン正規化／復元表示修正（ローカル・非公開）**。
+  本人確認で爆発音と鳴り続けは解消したが、定常音がDistortionのように聞こえるとの指摘があった。実画面ではDistortion / Chorus / EQ / Compressorは全てBYPASS。10プリセットのcore dry単音は最大でもSawの−4.615 dBFSで、core側の0 dBFS超過は無かった。一方、既定CLEAR IRはpeak 0.78だけで正規化され、二乗和平方根（畳み込みの平均ゲイン指標）が29.641だった。左右IRをそれぞれ二乗和1へ正規化し、CLEAR / BRIGHT / WARM / GRAINを48 kHzで0.9999999997〜1.0000000010に揃えた。素材、長さ、Damping、DC除去、末尾fadeは維持。併せて自動保存Sawを復元しながらセレクタがEPianoと表示する不一致を修正し、実ブラウザでSaw表示／Analog Sweep実値／Distortion BYPASSの一致、初回演奏後active key 0、console error 0を確認した。Web 57/57 PASS。Reverbの聴感上の音量と歪み解消は本人確認待ち。
+
+- **2026-09-07 M4l 独立LFO 2追加（ローカル・非公開）**。
+  参照音再現で異なる周期の動きを編集可能に重ねるため、LFO 1と独立したRate / Shape / Retrigger / Phase、global / voice位相、cycle、S&Hハッシュ層を持つLFO 2を追加した。既存6-slot MatrixのSource 8としてだけ接続し、LFO 1の直接送りは維持。既存IDを変更せず79〜82を末尾追加し、83パラメータ・engine version 13とした。C ABIと20 byteイベントは不変。core 67/67、Web 58/58、freestanding PASS、全18プリセットのnative/WASMはサンプル単位でビット一致。6 slot・LP24・16音×unison4は平均279.06 µs / p99 370.50 µsでhalf deadline 1333.5 µs以内。WASM 59,389 B（gzip 17,494 B）。通常OSC面はdesign-lint 390×844 / 1440×900でNG 0／WARN 0、44px未満0件。実ブラウザでLFO 2設定図、Matrixの9 source選択、横あふれ0、console warning/error 0を確認した。音色としての有用性は本人不在のため試聴保留。仕様は`SPEC_M4l.md`。
+
+- **2026-09-07 M4m Macro 3 / 4＋Mod EG追加（ローカル・非公開）**。
+  参照音再現で複数特性をまとめて操作し、アンプ／フィルタとは別の時間変化を作るため、5 ms平滑化つきMacroを4本へ拡張し、独立Mod EGのAttack / Decay / Sustain / Release / Curveを追加した。既存MatrixのSource 9〜11として接続し、既存IDとC ABIを維持して83〜89を末尾追加、engine version 14とした。UIはMatrix面へMod ENVを置き、390pxでは1列へ折り畳む。最終統合後のcore 71/71、Web 59/59、design-lint 390×844 / 1440×900はNG 0／WARN 0。本人試聴でMacro 3 / 4とMod Envelopeの動作を確認し、「多分大丈夫」と暫定評価。細かな質感と実用上の変化幅は後日確認するため、機能動作のみ確認済み・音質の最終承認は保留とする。仕様は`SPEC_M4m.md`。
+
+- **2026-09-07 M4n 共有Insert FXコア化（ローカル・非公開）**。
+  Web専用だったDistortion / Chorus / 3-band EQ / Compressorを順序変更可能な共有C++コアへ移し、AUからも同じ23パラメータを扱えるようにした。Delay / Reverbは軽いWeb専用後段として維持する。4 Insertは初期BYPASSで既存ゴールデンをビット一致させ、wet／bypassを平滑化、不正順序は既定順へフォールバックする。既存IDとC ABIを維持して90〜112を追加し、113パラメータ・engine version 15とした。core 71/71、Web 59/59、freestanding、CLI、WASMを確認。全18プリセットと4 Insert有効fixtureはnative/WASMでサンプル単位のビット一致。全Insertを加えた最大負荷は平均281.27 µs / p99 369.00 µsでhalf deadline 1333.5 µs以内。WASM 71,784 B（gzip 20,286 B）。Appleソースはarm64 macOS向けcompile-onlyを通したが、署名／登録とLogic実ホストは未確認。本人試聴では「とりあえず良さそう」と暫定承認され、4 Insertはこの状態を基準として一旦固定する。個々の深い質感評価は必要になった時点で再開する。仕様は`SPEC_M4n.md`。
+
+- **当面の進行順（本人不在中）**: 機能計画に沿う実装と自動検証をTerraで進め、聴感・端末・自然さの判断は保留一覧へ分離する。機能面が一巡した時点で本人が上位モデルへ切り替え、既存トークンを前提にUI/UX洗練を独立フェーズとして開始する。
+
+- **2026-09-08 M4o UI/UX整理（09-07夜開始、ローカル・非公開）**。
+  既存役割色を保持し、Patch toolsの開閉、見出し横のWave選択、ENV1/2/3・LFO1/2の2バンク、4 Macro横並びを実装。Mod ENVはOSCのENV3へ統合し、MATRIXから編集リンクを置いた。MODボタンは文脈付きのSource/Amountダイアログへ変更し、適用前キャンセル・既存更新/解除・6枠満杯時の上書き防止・単一Undoを検証。FX BYPASS文字の不透明度を維持し、並べ替え後のフォーカスを保持。プリセット検索は現在音色を切り替えず、フィルタ除外時も現在名を表示する。Web59件、独立Playwright13グループ、4タブ×390/1440pxのdesign-lint NG0/WARN0。5画面幅でページ横溢れなし。音源DSP/プリセット/WASM/AUは変更せず、WASM SHA-256 `e21e61e008e9a612e7e68ddcb92d798ebea50ff62e0314caa7cbe930aad544e2` を前後一致確認。ブラウザ試験は本人の編集中パッチとは別コンテキスト。音色の主観評価、実機タッチ、Logic実ホストは引き続き未確認。入口 `design/verify/m4o-ui-20260907/index.html`、再検証 `tools/test-studio-ui.py`。実装前Web3ファイルは同フォルダのbaselineへ保全した。
+
+- **2026-09-08 M4p Web鳴りっぱなし再発対策（ローカル・非公開）**。
+  本人から鳴りっぱなし再発の報告を受けた。単純なクリック／PCキー押下では再現しなかったため、再発し得る未保護経路を閉じた。初回Audio準備中に解放またはpanicした要求は世代付きNote Registryで失効させ、失効後に出力ゲートを再度開かない。画面鍵盤のpointerup / pointercancel / mouseupをwindow captureでも回収し、capture失敗時のpointerleaveを追加。PC keyup / keydownもcaptureし、`event.code`に加えて`event.key`をfallbackにする。Escapeは全ノート・voice・出力を即時panicする。同一オリジンの複数シンセタブにはBroadcastChannelで発音権を通知し、新しく弾いたタブ以外を停止する。Note Registryの競合・一括失効・同鍵盤複数入力を3件追加し、Web 62/62、core 71/71、diff check PASS。実Chromiumで修正版読込、初回画面鍵盤、PCキー、Escape後のactive key 0、console warning/error 0を確認。DSPコア、プリセット、WASM、AU、音色パラメータは変更せず、WASM SHA-256はM4o時点と一致。正確な元イベントと聴感上の最終解消は本人確認待ち。
 
 ## 進め方
 

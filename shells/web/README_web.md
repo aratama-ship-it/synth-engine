@@ -23,11 +23,24 @@ Chromium 系ブラウザで次を開く。
 
 ## Web Synth UI
 
-`synth.html`は、EPiano / Saw / Pluck / Bellに加え、Wide Pad / Warm Bass / Glass Bell / Bright Pluck / Motion Lead / Air Keysを起点に、OSC A、OSC B / MIX、FILTER、AMP ENVELOPE、LFO / MACRO、FX BUS、DELAY、REVERBを音の流れで編集する通常のシンセ画面である。PCキー`A W S E D F T G Y H U J K`または画面鍵盤の最初の操作で音源を開始し、そのまま演奏できる。プリセットを選ぶと全76パラメータを既定値へ戻してから当該音色を読むため、直前の音色設定は混ざらない。主要パラメータは直ちに`setParam()`へ送られ、残りのDSPパラメータは「詳細設定」に畳んでいる。
+`synth.html`は、Serum系の「音源／FX／変調を役割別に切り替える」構造を参照しつつ、SynthEngine固有の実パラメータだけで組んだStudio画面である。上部の`OSC / FX / MATRIX / MATCH`タブから、次を編集・確認する。
 
-FX BUSはコアのsend出力だけを受けるWeb Audioの入口である。その先は並列の`DELAY`と`REVERB`へ分かれ、各モジュールの`SEND`で入力を独立して止められる。`DELAY`は`MIX`と80〜720 msの`TIME`を持ち、初期値の`SEND`は0なので、INITでは反復エコーを鳴らさない。`REVERB`は`SEND`、`MATERIAL`、`MIX`を持つ。`CLEAR`は明るく密な既定残響、`WARM`は高域を抑えた長い残響、`GRAIN`は短く疎らな反射である。dry出力は従来どおり直接出力される。低域の濁りを避けるため、FX BUSの入口を120 Hzでハイパスしている。
+- `OSC`: A/B対称の波形、位置、レベル、ユニゾン、デチューン、ステレオ幅、音程。WAVEはBasic Shapes / Analog Sweep / Digital Edge / Hollow Formantの4領域、POSは各4フレームを連続移動する。実値から描くENV 1 / ENV 2 / LFO 1 / LFO 2設定図と、SUB / NOISE / FM、FILTER。LFO 1は直接送りとMatrix、LFO 2はMatrix専用の独立sourceとして使う。
+- `FX`: 共有C++コアで順序を動かせるDistortion / Chorus / 3-band EQ / Compressorと、Web専用の独立したDelay / Reverb。insertはすべて初期BYPASS、Delayも初期BYPASS、Reverbは初期ON。
+- `MATRIX`: コアと同じ12 source選択（None + 11信号）、14 destination選択（None + 13送り先）、6 slot。SOURCEを選んでOSC面の`+ MOD`を押す方法と、行を直接編集する方法は同じパラメータ55〜72へ接続される。Macro 1〜4と独立Mod EGをsourceにできる。
+- `MATCH`: 参照音をブラウザ内だけで復号し、長さ、ピーク、全体／active RMS、10–90%の立ち上がり、単音ピッチと信頼度、微分ベースの明るさ指標、ステレオ幅、20 ms RMS包絡を測る。包絡からAMP Attack / Decay / Sustain / Releaseの根拠付き仮説を表示し、`APPLY DETECTED`を押したときだけ検出値を適用する。note-offを自然減衰から分離できない場合はReleaseを`KEEP CURRENT`とする。FilterがONかつLP12 / LP24なら、BrightnessをCutoff値と読み替えず、現在値から必要方向へ×2または×0.5した分析専用probeを1回だけ描画して局所応答を測り、Cutoffだけの候補を表示する。`APPLY CUTOFF`を押すまでパッチは変更せず、Filter ON / Mode / Resonance / EGは保持する。pitch confidence 70%以上なら、Insert用ID 90〜112を除くcore dry値を最寄りMIDI noteと参照の発音区間で最大12秒オフライン描画できる。参照と候補はactive RMS −18 dBFS、peak ceiling −1 dBFSで別々に補正し、`A REFERENCE / B CURRENT / STOP`で比較する。候補は`CORE DRY`で、Insert / Delay / Reverbを含まない。ドライな単音0.5〜4秒を推奨する。
 
-このUIはWeb殻だけの追加であり、DSP/C ABI/WASM、AU、スタンドアロン、random-scale-keysの既定経路を変更しない。設計メモと数値トークンは`design/SYNTH_UI_DESIGN.md`、`design/SYNTH_UI_TOKEN_SHEET.md`に置く。
+PCキー`A W S E D F T G Y H U J K`または画面鍵盤の最初の操作でAudioContextを開始し、その操作自体も発音になる。ダイヤルは上下ドラッグ、Shift併用の微調整、ダブルクリックの初期値復帰、単位付き数値入力、rangeのキー操作に対応する。文字入力欄とselectへ入力中だけPC鍵盤演奏を抑止する。
+
+共有Insertはコア内部でwet/bypassを平滑化する。AudioContext停止中はDelay入力、Reverb mixなどWeb側AudioParamを予約補間せず即時値で初期化する。出力は0から25 msで開く安全ゲートを通し、初回の過大出力を防ぐ。画面鍵盤はpointer IDごとに発音を管理し、`pointerup` / `pointercancel` / `lostpointercapture`で解除する。ウインドウのblur、pagehide、非表示化では待機中と発音中のノートを消去し、コアをvoice resetして出力ゲートを閉じる。次の演奏入力で同じAudioContextを再開できる。
+
+FXは`OSC / FILTER / AMP → MASTER → 共有C++ INSERTS → DRY + Web DELAY + Web REVERB → 出力安全ゲート`の順に処理する。共有InsertはAUからも同じパラメータと順序で使える。DelayはTIME / FEEDBACK / TONE / MIX、ReverbはMATERIAL / SIZE / DECAY / DAMPING / PRE-DELAY / LOW CUT / HIGH CUT / WIDTH / MIXを持つ。MATERIALはCLEAR / BRIGHT / WARM / GRAINで、WARMを暗さの下限とし、BRIGHTは18 kHzまで高域を開いた短めの対照素材。DAMPINGはDECAYやHIGH CUTとは独立して、高域が残響の尾から失われる速さだけを0〜100%で変える。100%を従来の高域減衰率として、それ以上暗くはしない。ReverbのIRは密なステレオテール、周波数別減衰、DC除去、末尾フェードを持ち、左右それぞれの二乗和を1へ正規化して長さや密度による過大な畳み込みゲインを防ぐ。変更時は二つのConvolverをcrossfadeする。DAMPINGは既存IRの係数を変えるだけで、AudioNodeや常時処理を追加しない。コアのsend出力（出力1）はAPIとして維持するが、この楽器画面の空間系入力には使わない。
+
+パッチは`schemaVersion: 1`で、合成・変調用core ID 0〜89、共有Insertへ写像する`fx`値と順序、Web空間系をまとめる。既存10音色に加え、ローカル保存は最大8件。自動復元、検索／カテゴリ、Undo / Redo、JSON EXPORT / IMPORTがある。旧76／79／83／90値パッチは不足値を既定値で補い、`fx`を正本として読み込む。破損JSONは適用前に拒否し、既存状態を保つ。ユーザー保存と自動復元はこのページの`localStorage`内だけで、外部送信しない。
+
+MATCHの候補描画後にcoreパラメータ、preset、INIT、Undo / Redo、JSON importでcore値が変わると、前の候補を比較不能にして再描画を求める。AMP ENV仮説とFilter Cutoff仮説の適用も同じ扱いで、変更は既存Undoから一手で戻せる。A/B下の包絡相関、pitch cents差、attack差、brightness差は次に触る場所を絞る補助値であり、音色の一致や完成判定ではない。仕様境界は`SPEC_M4c.md`、`SPEC_M4d.md`、`SPEC_M4e.md`。
+
+Studio UIの保存・操作面とDelay / ReverbはWeb殻に置き、共有InsertはM4nからコア／AUにも公開する。M4aではコアの内蔵4 wavetableを各4フレームへ拡張し、C ABIとパラメータ数を維持したままengine versionを9へ更新した。M4fではmip境界をalias-safeな100 cent crossfadeへ変更し、同じ境界を通るWeb / nativeコアをengine version 10へ更新した。M4gではMorph／FM／Level系8操作の5 ms平滑化と、unisonのdetune／pan配置分離をコアへ追加しengine versionを11へ更新した。M4hではBalanced位相、Natural Widthカーブ、高域FM Guardを比較用の3パラメータとして追加し、engine versionを12へ更新した。M4iでは日常のOSC操作を先頭へ戻し、`QUALITY LAB`は通常画面から外して`?quality=1`の明示的な検証URLだけに残した。M4jではAudioContext再開直後のWeb FX初期値と入力解放を安全化し、M4kではReverb IRの過大ゲインと自動復元時のプリセット表示ずれを修正した。M4lではMatrix専用の独立LFO 2を追加し、既存IDを維持したまま83パラメータ・engine version 13へ更新した。M4mではMacro 3 / 4と独立Mod EGを追加して90パラメータ・engine version 14へ、M4nでは4 Insertと順序を共通コアへ移して113パラメータ・engine version 15へ更新した。比較時は従来どおりユニゾンとFMを独立操作でき、Studio全体の44px操作面積とコンパクト密度も維持する。設計メモと数値トークンは`design/SYNTH_UI_DESIGN.md`、`design/SYNTH_UI_TOKEN_SHEET.md`に置く。2026-09-07の比較音と検証台帳は`design/overnight-runs/2026-09-07-serum-until-08/`に置く。
 
 ## 確認手順
 
@@ -83,12 +96,20 @@ node tools/web-voiceparam-check.mjs
 
 `render-cli`は通常の`--out FILE`に加え、必要な場合だけ`--send-out FILE`でステレオFloat32 WAVのセンド出力を書き出せる。
 
+M4bの参照音解析をCLIから確認する場合は、32-bit float WAVを渡す。JSONにはMATCH画面と同じ測定値と包絡列が入る。
+
+```sh
+node tools/analyze-sound.mjs design/verify/ref/rsk_epiano.wav
+```
+
+共有測定モジュールは`shells/web/sound-analysis.js`。旧M2比較の`tools/compare-timbre.mjs`も同じ20 ms RMS包絡、微分ベース重心、相関関数を使う。
+
 ## 実測値
 
 | 項目 | 値 | 環境・備考 |
 |---|---:|---|
-| WASM raw | 49,898 B | `wc -c build/synth_engine.wasm`、2026-09-06実測 |
-| WASM gzip | 15,047 B | `gzip -c build/synth_engine.wasm \| wc -c`、2026-09-06実測 |
+| WASM raw | 71,784 B | `wc -c build/synth_engine.wasm`、2026-09-07 M4n実測 |
+| WASM gzip | 20,286 B | gzip圧縮、2026-09-07 M4n実測 |
 | batch `ready` | ブラウザ確認後に記録 | Worklet 内 `WebAssembly.instantiate` 開始から batch 適用可能になるまで |
 | `process()` average | ブラウザ確認後に記録 | `performance.now()`、直近最大1000ブロック |
 | `process()` p99 | ブラウザ確認後に記録 | 同上 |

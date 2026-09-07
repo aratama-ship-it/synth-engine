@@ -1,67 +1,23 @@
 // 旧音源の参照WAVと synth-engine の出力を比べる（M2 の当てはめ用）。
 // 使い方: node tools/compare-timbre.mjs design/verify/ref/rsk_epiano.wav build/cand_epiano.wav
-import fs from "node:fs";
+import { correlation, derivativeCentroid, rmsEnvelope } from "../shells/web/sound-analysis.js";
+import { deinterleaveWav, readFloat32Wav } from "./lib/wav.mjs";
 
 function readWav(file) {
-  const data = fs.readFileSync(file);
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  let pos = 12, fmt = null, chunk = null;
-  while (pos + 8 <= data.length) {
-    const id = data.toString("ascii", pos, pos + 4);
-    const size = view.getUint32(pos + 4, true);
-    if (id === "fmt ") fmt = { format: view.getUint16(pos + 8, true), ch: view.getUint16(pos + 10, true), sr: view.getUint32(pos + 12, true) };
-    if (id === "data") chunk = { off: pos + 8, size };
-    pos += 8 + size + (size & 1);
-  }
-  const n = chunk.size / 4;
-  const all = new Float32Array(n);
-  for (let i = 0; i < n; i++) all[i] = view.getFloat32(chunk.off + i * 4, true);
-  const left = new Float32Array(n / fmt.ch);
-  for (let i = 0; i < left.length; i++) left[i] = all[i * fmt.ch];
-  return { left, sr: fmt.sr };
-}
-
-// 20ms窓ごとの RMS 列（振幅包絡）
-function envelope(x, sr, windowSeconds = 0.02) {
-  const w = Math.round(sr * windowSeconds), out = [];
-  for (let start = 0; start + w <= x.length; start += w) {
-    let sum = 0;
-    for (let i = start; i < start + w; i++) sum += x[i] * x[i];
-    out.push(Math.sqrt(sum / w));
-  }
-  return out;
-}
-
-// 微分ベースのスペクトル重心（零交差率と違い波形の形に強い）
-function centroid(x, sr, from, to) {
-  let num = 0, den = 0;
-  for (let i = Math.max(1, from); i < Math.min(x.length, to); i++) {
-    const d = x[i] - x[i - 1];
-    num += d * d; den += x[i] * x[i];
-  }
-  return den > 0 ? (sr / (2 * Math.PI)) * Math.sqrt(num / den) : 0;
-}
-
-function correlation(a, b) {
-  const n = Math.min(a.length, b.length);
-  let ma = 0, mb = 0;
-  for (let i = 0; i < n; i++) { ma += a[i]; mb += b[i]; }
-  ma /= n; mb /= n;
-  let num = 0, da = 0, dbv = 0;
-  for (let i = 0; i < n; i++) { const x = a[i] - ma, y = b[i] - mb; num += x * y; da += x * x; dbv += y * y; }
-  return da > 0 && dbv > 0 ? num / Math.sqrt(da * dbv) : 0;
+  const wav = readFloat32Wav(file);
+  return { left:deinterleaveWav(wav)[0], sr:wav.fmt.sr };
 }
 
 const [refPath, candPath] = process.argv.slice(2);
 const ref = readWav(refPath), cand = readWav(candPath);
-const refEnv = envelope(ref.left, ref.sr), candEnv = envelope(cand.left, cand.sr);
+const refEnv = rmsEnvelope(ref.left, ref.sr).values, candEnv = rmsEnvelope(cand.left, cand.sr).values;
 const corr = correlation(refEnv, candEnv);
 
 // 音色は「鳴っている区間」で比べる。無音を含めると重心が壊れるため
 const segments = [[0.05, 0.2], [0.2, 0.6], [0.6, 1.2]];
 const rows = segments.map(([a, b]) => {
-  const rc = centroid(ref.left, ref.sr, a * ref.sr, b * ref.sr);
-  const cc = centroid(cand.left, cand.sr, a * cand.sr, b * cand.sr);
+  const rc = derivativeCentroid(ref.left, ref.sr, a * ref.sr, b * ref.sr);
+  const cc = derivativeCentroid(cand.left, cand.sr, a * cand.sr, b * cand.sr);
   return { range: `${a}-${b}s`, ref: rc, cand: cc, diff: rc > 0 ? (cc - rc) / rc * 100 : 0 };
 });
 const meanAbsDiff = rows.reduce((sum, r) => sum + Math.abs(r.diff), 0) / rows.length;

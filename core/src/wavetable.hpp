@@ -19,6 +19,8 @@ void initialize_builtin_wavetables(WavetableBank* bank);
 int load_wavetable(WavetableBank* bank, uint32_t slot, const float* frames, uint32_t frameCount);
 float read_wavetable(const WavetableBank* bank, uint32_t slot, float morph,
                      uint32_t mip, double phase);
+float read_wavetable_bandlimited(const WavetableBank* bank, uint32_t slot, float morph,
+                                 double frequency, double sampleRate, double phase);
 uint32_t select_mip(double frequency, double sampleRate);
 
 }  // namespace synth

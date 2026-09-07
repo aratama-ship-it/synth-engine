@@ -5,42 +5,288 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="SynthEngineのウェーブテーブル・シンセサイザーをブラウザで演奏し編集する画面">
   <title>SynthEngine — Web Synth</title>
-  <link rel="stylesheet" href="./synth-ui.css">
+  <link rel="stylesheet" href="./synth-ui.css?m4o=1">
 </head>
 <body>
   <header class="topbar">
-    <div class="identity"><span class="identity-mark" aria-hidden="true">SE</span><h1>SynthEngine</h1><span class="identity-sub">WEB SYNTH</span></div>
+    <div class="identity"><span class="identity-mark" aria-hidden="true">SE</span><h1>SynthEngine</h1></div>
     <div class="top-controls">
       <label class="preset-picker">PRESET <select id="preset" aria-label="プリセット"></select></label>
-      <button id="init" class="button button-quiet" type="button">INIT</button>
+      <button id="save-patch" class="button button-quiet" type="button">SAVE</button>
+      <button id="undo" class="button button-quiet" type="button" disabled>UNDO</button>
+      <button id="redo" class="button button-quiet" type="button" disabled>REDO</button>
+      <button id="patch-tools-toggle" class="button button-quiet" type="button" aria-expanded="false" aria-controls="patch-tools">PATCH TOOLS</button>
+      <div id="global-controls" class="global-controls" aria-label="グローバル設定"></div>
     </div>
+    <section id="patch-tools" class="patch-tools" aria-label="プリセットの検索とファイル操作" hidden>
+      <label class="preset-filter">SEARCH <input id="preset-search" type="search" aria-label="プリセット検索" placeholder="音色名を検索"></label>
+      <label class="preset-filter">CATEGORY <select id="preset-category" aria-label="プリセットカテゴリ"><option>All</option><option>Pad</option><option>Bass</option><option>Pluck</option><option>Bell</option><option>Lead</option><option>Keys</option><option>FX</option><option>Custom</option></select></label>
+      <button id="export-patch" class="button button-quiet" type="button">EXPORT JSON</button>
+      <button id="import-patch" class="button button-quiet" type="button">IMPORT JSON</button>
+      <input id="patch-file" class="visually-hidden" type="file" accept="application/json,.json" tabindex="-1">
+      <button id="init" class="button button-quiet" type="button">INIT PATCH</button>
+      <div id="voice-controls" class="global-controls" aria-label="発音数"></div>
+      <p>LOCAL ONLY · 保存はこのブラウザ内。別の環境へ移すときはEXPORT JSON。</p>
+      <p class="signal-note">SIGNAL: OSC / FILTER / AMP → MASTER → INSERTS → DRY + DELAY + REVERB</p>
+      <p>4 WT × 4 frames · 3 ENV · 2 LFO · 4 Macro · 6 matrix slots</p>
+    </section>
   </header>
+
+  <div id="patch-save-overlay" class="patch-save-overlay" hidden>
+    <form id="patch-save-panel" class="patch-save-panel" role="dialog" aria-modal="true" aria-labelledby="patch-save-title">
+      <div><p class="eyebrow">USER PATCH</p><h2 id="patch-save-title">名前を付けて保存</h2></div>
+      <label>NAME <input id="patch-name" type="text" maxlength="80" autocomplete="off" required></label>
+      <label>CATEGORY <select id="patch-save-category"><option>Pad</option><option>Bass</option><option>Pluck</option><option>Bell</option><option>Lead</option><option>Keys</option><option>FX</option><option>Custom</option></select></label>
+      <p id="patch-save-warning" class="patch-save-warning" role="status" aria-live="polite"></p>
+      <div class="patch-save-actions"><button id="patch-save-cancel" class="button button-quiet" type="button">CANCEL</button><button id="patch-save-confirm" class="button button-main" type="submit">SAVE</button></div>
+    </form>
+  </div>
+
+  <dialog id="mod-dialog" class="mod-dialog" aria-labelledby="mod-dialog-title" aria-describedby="mod-dialog-help">
+    <form id="mod-dialog-form">
+      <p class="eyebrow">MODULATION · 6 SHARED SLOTS</p>
+      <h2 id="mod-dialog-title">変調を設定</h2>
+      <p id="mod-dialog-help">変調元と深さを選び、APPLYで接続します。元のノブの値は変更しません。</p>
+      <label class="mod-dialog-source">SOURCE<select id="mod-dialog-source" aria-label="変調元"></select></label>
+      <label class="mod-dialog-amount">AMOUNT <output id="mod-dialog-amount-value" for="mod-dialog-amount">+50%</output><input id="mod-dialog-amount" type="range" min="-1" max="1" step=".01" value=".5" aria-label="変調の深さ"></label>
+      <p id="mod-dialog-state" role="status" aria-live="polite"></p>
+      <div id="mod-dialog-routes" class="mod-dialog-routes" aria-label="この対象への接続"></div>
+      <div class="mod-dialog-actions"><button id="mod-dialog-cancel" class="button button-quiet" type="button">CLOSE</button><button id="mod-dialog-apply" class="button button-main" type="submit">APPLY</button></div>
+    </form>
+  </dialog>
 
   <main>
     <p id="status" class="status" role="status" aria-live="polite">WASMを読み込んでいます…</p>
 
-    <section class="overview" aria-labelledby="overview-title">
-      <div><p class="eyebrow">SIGNAL PATH</p><h2 id="overview-title">OSC A + OSC B → MIX → FILTER → AMP → FX BUS → DELAY / REVERB</h2></div>
-      <div id="global-controls" class="global-controls" aria-label="グローバル設定"></div>
+    <nav class="work-tabs" role="tablist" aria-label="音作り画面">
+      <button id="tab-osc" class="work-tab is-selected" role="tab" aria-selected="true" aria-controls="panel-osc" tabindex="0" type="button">OSC</button>
+      <button id="tab-fx" class="work-tab" role="tab" aria-selected="false" aria-controls="panel-fx" tabindex="-1" type="button">FX</button>
+      <button id="tab-matrix" class="work-tab" role="tab" aria-selected="false" aria-controls="panel-matrix" tabindex="-1" type="button">MATRIX</button>
+      <button id="tab-match" class="work-tab" role="tab" aria-selected="false" aria-controls="panel-match" tabindex="-1" type="button">MATCH</button>
+    </nav>
+
+    <section id="panel-osc" class="work-panel is-active" role="tabpanel" aria-labelledby="tab-osc">
+      <section id="quality-lab" class="quality-lab" aria-labelledby="quality-lab-title" hidden>
+        <div class="quality-lab-heading"><p class="eyebrow">A/B</p><h2 id="quality-lab-title">QUALITY LAB</h2></div>
+        <div class="quality-setting">
+          <span>4-VOICE UNISON</span>
+          <div class="quality-options" role="group" aria-label="4声ユニゾンの位相開始とWidthカーブ">
+            <button id="unison-quality-legacy" class="quality-option" type="button" aria-pressed="true">RANDOM / LINEAR</button>
+            <button id="unison-quality-focused" class="quality-option" type="button" aria-pressed="false">BALANCED / NATURAL</button>
+          </div>
+          <small id="unison-quality-state">Random phase · Linear width</small>
+        </div>
+        <div class="quality-setting">
+          <span>FM HIGH RANGE</span>
+          <div class="quality-options" role="group" aria-label="FM高域エイリアス対策">
+            <button id="fm-quality-legacy" class="quality-option" type="button" aria-pressed="true">LEGACY</button>
+            <button id="fm-quality-hq" class="quality-option" type="button" aria-pressed="false">HQ GUARD</button>
+          </div>
+          <small id="fm-quality-state">Full depth · legacy spectrum</small>
+        </div>
+      </section>
+      <div class="oscillator-pair">
+        <section class="module module-osc oscillator-card" aria-labelledby="osc-a-title">
+          <div class="module-heading"><p>A</p><h2 id="osc-a-title">OSCILLATOR A</h2><div id="wave-picker-a" class="wave-picker"></div></div>
+          <svg id="wave-a" class="waveform" viewBox="0 0 520 152" role="img" aria-label="Oscillator Aの現在の波形"><path class="wave-grid" d="M0 76H520 M130 0V152 M260 0V152 M390 0V152"></path><path class="wave-line" d=""></path></svg>
+          <div id="osc-a" class="control-grid oscillator-controls"></div>
+        </section>
+        <section class="module module-osc oscillator-card" aria-labelledby="osc-b-title">
+          <div class="module-heading"><p>B</p><h2 id="osc-b-title">OSCILLATOR B</h2><div id="wave-picker-b" class="wave-picker"></div></div>
+          <svg id="wave-b" class="waveform" viewBox="0 0 520 152" role="img" aria-label="Oscillator Bの現在の波形"><path class="wave-grid" d="M0 76H520 M130 0V152 M260 0V152 M390 0V152"></path><path class="wave-line" d=""></path></svg>
+          <div id="osc-b" class="control-grid oscillator-controls"></div>
+        </section>
+      </div>
+      <div class="tone-row">
+        <section class="module module-mix" aria-labelledby="mix-title"><div class="module-heading"><p>MIX</p><h2 id="mix-title">SUB / NOISE / FM</h2></div><div id="mix" class="control-grid"></div></section>
+        <section class="module module-filter" aria-labelledby="filter-title"><div class="module-heading"><p>FLT</p><h2 id="filter-title">FILTER</h2></div><div id="filter" class="control-grid"></div></section>
+      </div>
+      <div class="modulator-row">
+        <div class="editor-bank" data-editor-bank="env">
+          <div class="editor-tabs" role="tablist" aria-label="エンベロープの選択">
+            <button id="editor-tab-amp" role="tab" aria-selected="true" aria-controls="editor-amp" tabindex="0" type="button">ENV 1 · AMP</button>
+            <button id="editor-tab-filter" role="tab" aria-selected="false" aria-controls="editor-filter" tabindex="-1" type="button">ENV 2 · FILTER</button>
+            <button id="editor-tab-modenv" role="tab" aria-selected="false" aria-controls="editor-modenv" tabindex="-1" type="button">ENV 3 · MOD</button>
+          </div>
+          <div id="editor-amp" role="tabpanel" aria-labelledby="editor-tab-amp">
+        <section class="module module-amp" aria-labelledby="amp-title"><div class="module-heading"><p>ENV 1</p><h2 id="amp-title">AMP ENVELOPE</h2></div><svg id="env-amp-graph" class="mod-graph" viewBox="0 0 360 112" role="img" aria-label="Amp envelopeの設定形状"><path></path></svg><div id="amp" class="control-grid compact-controls"></div></section>
+          </div><div id="editor-filter" role="tabpanel" aria-labelledby="editor-tab-filter" hidden>
+        <section class="module module-filter-eg" aria-labelledby="filter-eg-title"><div class="module-heading"><p>ENV 2</p><h2 id="filter-eg-title">FILTER ENVELOPE</h2></div><svg id="env-filter-graph" class="mod-graph" viewBox="0 0 360 112" role="img" aria-label="Filter envelopeの設定形状"><path></path></svg><div id="filter-eg" class="control-grid compact-controls"></div></section>
+          </div><div id="editor-modenv" role="tabpanel" aria-labelledby="editor-tab-modenv" hidden>
+        <section class="module module-filter-eg" aria-labelledby="mod-env-title"><div class="module-heading"><p>ENV 3</p><h2 id="mod-env-title">MOD ENVELOPE</h2></div><svg id="env-mod-graph" class="mod-graph" viewBox="0 0 360 112" role="img" aria-label="Mod envelopeの設定形状"><path></path></svg><div id="mod-env" class="control-grid compact-controls"></div></section>
+          </div>
+        </div>
+        <div class="editor-bank" data-editor-bank="lfo">
+          <div class="editor-tabs" role="tablist" aria-label="LFOの選択">
+            <button id="editor-tab-lfo1" role="tab" aria-selected="true" aria-controls="editor-lfo1" tabindex="0" type="button">LFO 1</button>
+            <button id="editor-tab-lfo2" role="tab" aria-selected="false" aria-controls="editor-lfo2" tabindex="-1" type="button">LFO 2</button>
+          </div><div id="editor-lfo1" role="tabpanel" aria-labelledby="editor-tab-lfo1">
+        <section class="module module-mod" aria-labelledby="mod-title"><div class="module-heading"><p>LFO 1</p><h2 id="mod-title">MODULATOR</h2></div><svg id="lfo-graph" class="mod-graph" viewBox="0 0 360 112" role="img" aria-label="LFO 1の設定形状"><path></path></svg><div id="mod" class="control-grid compact-controls"></div></section>
+          </div><div id="editor-lfo2" role="tabpanel" aria-labelledby="editor-tab-lfo2" hidden>
+        <section class="module module-mod" aria-labelledby="mod-2-title"><div class="module-heading"><p>LFO 2</p><h2 id="mod-2-title">MODULATOR</h2></div><svg id="lfo2-graph" class="mod-graph" viewBox="0 0 360 112" role="img" aria-label="LFO 2の設定形状"><path></path></svg><div id="mod-2" class="control-grid compact-controls"></div></section>
+          </div>
+        </div>
+      </div>
     </section>
 
-    <section class="synth-grid" aria-label="音色編集">
-      <section class="module module-osc" aria-labelledby="osc-a-title"><div class="module-heading"><p>01</p><h2 id="osc-a-title">OSC A</h2></div><div id="osc-a" class="control-grid"></div></section>
-      <section class="module module-osc" aria-labelledby="osc-b-title"><div class="module-heading"><p>02</p><h2 id="osc-b-title">OSC B / MIX</h2></div><div id="osc-b" class="control-grid"></div></section>
-      <section class="module module-filter" aria-labelledby="filter-title"><div class="module-heading"><p>03</p><h2 id="filter-title">FILTER</h2></div><div id="filter" class="control-grid"></div></section>
-      <section class="module module-amp" aria-labelledby="amp-title"><div class="module-heading"><p>04</p><h2 id="amp-title">AMP ENVELOPE</h2></div><div id="amp" class="control-grid"></div></section>
-      <section class="module module-mod" aria-labelledby="mod-title"><div class="module-heading"><p>05</p><h2 id="mod-title">LFO / MACRO</h2></div><div id="mod" class="control-grid"></div></section>
-      <section class="module module-delay" aria-labelledby="delay-title"><div class="module-heading"><p>06</p><h2 id="delay-title">DELAY</h2></div><div id="delay" class="control-grid"></div></section>
-      <section class="module module-reverb" aria-labelledby="reverb-title"><div class="module-heading"><p>07</p><h2 id="reverb-title">REVERB</h2></div><div id="reverb" class="control-grid"></div></section>
+    <section id="panel-fx" class="work-panel" role="tabpanel" aria-labelledby="tab-fx" hidden>
+      <div class="fx-route" aria-label="エフェクト経路"><span>OSC / FILTER / AMP</span><b>→</b><span>MASTER</span><b>→</b><span>INSERT RACK</span><b>→</b><span>DRY + DELAY + REVERB</span></div>
+      <div id="insert-rack" class="insert-rack" aria-label="インサートエフェクト"></div>
+      <div class="time-effects">
+        <section class="module module-delay" aria-labelledby="delay-title"><div class="module-heading"><p>DLY</p><h2 id="delay-title">DELAY</h2></div><div id="delay" class="control-grid"></div></section>
+        <section class="module module-reverb" aria-labelledby="reverb-title"><div class="module-heading"><p>RVB</p><h2 id="reverb-title">REVERB</h2></div><div id="reverb" class="control-grid"></div></section>
+      </div>
+    </section>
+
+    <section id="panel-matrix" class="work-panel" role="tabpanel" aria-labelledby="tab-matrix" hidden>
+      <div class="matrix-editor-link"><p>全接続をここで一覧編集。エンベロープの形はOSC画面にまとめました。</p><button id="edit-mod-envelope" class="button button-quiet" type="button">ENV 3を編集 →</button></div>
+      <section class="module matrix-module" aria-labelledby="matrix-title"><div class="module-heading"><p>MOD</p><h2 id="matrix-title">MODULATION MATRIX</h2></div><div id="matrix" class="matrix-table"></div></section>
+      <details class="advanced"><summary>DSP PARAMETER MAP <span>画面に割り当てていない実パラメータ</span></summary><div id="advanced-controls" class="advanced-controls"></div></details>
+    </section>
+
+    <section id="panel-match" class="work-panel" role="tabpanel" aria-labelledby="tab-match" hidden>
+      <section class="module module-match" aria-labelledby="match-title">
+        <div class="module-heading"><p>REF</p><h2 id="match-title">REFERENCE SOUND</h2></div>
+        <div class="match-intro">
+          <div><p class="match-lead">聞いた音を、編集できるシンセ値へ戻すための比較レイヤーです。</p><p>参照音を測り、現在のcoreパッチを同じ音程と長さで描画します。この段階では現在のパッチを変更しません。</p></div>
+          <label class="match-load-button">LOAD AUDIO<input id="match-file" class="visually-hidden" type="file" accept="audio/*,.wav,.aif,.aiff,.mp3,.m4a,.flac,.ogg"></label>
+        </div>
+        <p class="match-privacy">LOCAL ONLY · ファイルはこのブラウザ内で解析し、送信・保存しません。ドライな単音0.5〜4秒を推奨します。</p>
+
+        <div id="match-empty" class="match-empty">
+          <p id="match-empty-title">参照音を読み込むと、測定結果がここに出ます。</p>
+          <p id="match-empty-detail">対応形式はブラウザが再生できる音声です。和音・長い残響・大きなノイズは、単音ピッチの信頼度を下げます。</p>
+        </div>
+
+        <div id="match-results" class="match-results" hidden>
+          <div class="match-source">
+            <div><span>REFERENCE · ORIGINAL / UNMATCHED</span><strong id="match-file-name">—</strong></div>
+            <audio id="match-audio" controls preload="metadata" aria-label="読み込んだ参照音"></audio>
+          </div>
+          <div class="match-metrics" aria-label="参照音の測定値">
+            <article><span>DURATION</span><strong id="match-duration">—</strong><small>file length</small></article>
+            <article><span>PITCH</span><strong id="match-pitch">—</strong><small id="match-pitch-note">monophonic estimate</small></article>
+            <article><span>CONFIDENCE</span><strong id="match-confidence">—</strong><small>pitch reliability</small></article>
+            <article><span>ATTACK</span><strong id="match-attack">—</strong><small>10–90% RMS</small></article>
+            <article><span>BRIGHTNESS</span><strong id="match-brightness">—</strong><small>derivative proxy</small></article>
+            <article><span>WIDTH</span><strong id="match-width">—</strong><small>mid / side energy</small></article>
+            <article><span>PEAK</span><strong id="match-peak">—</strong><small>dBFS</small></article>
+            <article><span>RMS</span><strong id="match-rms">—</strong><small>dBFS</small></article>
+          </div>
+          <figure class="match-figure">
+            <figcaption><span>MEASURED FROM AUDIO</span><strong>AMPLITUDE ENVELOPE · 20 ms RMS</strong></figcaption>
+            <svg id="match-envelope" viewBox="0 0 1000 128" role="img" aria-label="参照音から測定した振幅包絡"><path class="match-grid" d="M0 32H1000 M0 64H1000 M0 96H1000 M250 0V128 M500 0V128 M750 0V128"></path><path class="match-envelope-line" d=""></path></svg>
+          </figure>
+          <div id="match-warnings" class="match-warnings" role="status" aria-live="polite"></div>
+
+          <section class="match-amp" aria-labelledby="match-amp-title">
+            <div class="match-amp-heading">
+              <div>
+                <p class="eyebrow">CANDIDATE PARAMETERS · MEASURED HYPOTHESIS</p>
+                <h3 id="match-amp-title">AMP ENV</h3>
+              </div>
+              <strong id="match-amp-state" class="match-amp-state">UNAVAILABLE</strong>
+            </div>
+            <p class="match-amp-intro">参照包絡から初期候補を作ります。測定できない値は現在値を保持し、ボタンを押すまでパッチへ適用しません。</p>
+            <div class="match-amp-values" aria-label="現在値から提案値へのAMP envelope候補">
+              <article>
+                <span>ATTACK</span>
+                <strong><b id="match-amp-current-attack">—</b><i aria-hidden="true">→</i><b id="match-amp-suggested-attack">—</b></strong>
+                <small id="match-amp-evidence-attack">not measured</small>
+              </article>
+              <article>
+                <span>DECAY</span>
+                <strong><b id="match-amp-current-decay">—</b><i aria-hidden="true">→</i><b id="match-amp-suggested-decay">—</b></strong>
+                <small id="match-amp-evidence-decay">not measured</small>
+              </article>
+              <article>
+                <span>SUSTAIN</span>
+                <strong><b id="match-amp-current-sustain">—</b><i aria-hidden="true">→</i><b id="match-amp-suggested-sustain">—</b></strong>
+                <small id="match-amp-evidence-sustain">not measured</small>
+              </article>
+              <article>
+                <span>RELEASE</span>
+                <strong><b id="match-amp-current-release">—</b><i aria-hidden="true">→</i><b id="match-amp-suggested-release">KEEP CURRENT</b></strong>
+                <small id="match-amp-evidence-release">note-off not separable</small>
+              </article>
+            </div>
+            <div class="match-amp-action">
+              <p id="match-amp-note">参照音の測定後に候補を表示します。</p>
+              <button id="match-amp-apply" type="button" disabled>APPLY DETECTED</button>
+            </div>
+          </section>
+
+          <section class="match-candidate" aria-labelledby="match-candidate-title">
+            <div class="match-candidate-copy">
+              <p class="eyebrow">CANDIDATE · CORE DRY</p>
+              <h3 id="match-candidate-title">現在のパッチを参照条件で描画</h3>
+              <p id="match-render-note">音高を確認しています。</p>
+              <p class="match-boundary">Insert / Delay / Reverbは比較に含めません。候補は現在の値の写しで、自動補正ではありません。</p>
+            </div>
+            <button id="match-render" class="match-render-button" type="button" disabled>RENDER CURRENT</button>
+          </section>
+
+          <section class="match-filter" aria-labelledby="match-filter-title">
+            <div class="match-filter-heading">
+              <div>
+                <p class="eyebrow">CALIBRATED PARAMETER · CORE RESPONSE</p>
+                <h3 id="match-filter-title">FILTER CUTOFF</h3>
+              </div>
+              <strong id="match-filter-state" class="match-filter-state">WAITING</strong>
+            </div>
+            <p class="match-filter-intro">BrightnessをCutoff Hzと同一視せず、現在のcoreでCutoffだけを1回試験描画して反応量を測ります。</p>
+            <div class="match-filter-body">
+              <article class="match-filter-cutoff">
+                <span>CUTOFF · CURRENT → SUGGESTED</span>
+                <strong><b id="match-filter-current">—</b><i aria-hidden="true">→</i><b id="match-filter-suggested">—</b></strong>
+                <small id="match-filter-evidence">RENDER CURRENTで較正します。</small>
+              </article>
+              <div class="match-filter-metrics" aria-label="Cutoff較正のBrightness測定値">
+                <article><span>REFERENCE</span><strong id="match-filter-reference-brightness">—</strong><small>measured audio</small></article>
+                <article><span>CURRENT</span><strong id="match-filter-current-brightness">—</strong><small>core dry</small></article>
+                <article><span>PROBE</span><strong id="match-filter-probe-brightness">—</strong><small id="match-filter-probe-note">analysis only</small></article>
+              </div>
+            </div>
+            <div class="match-filter-action">
+              <p id="match-filter-note">LP12 / LP24かつFilter ONの場合だけ提案します。他のFilter値は保持します。</p>
+              <button id="match-filter-apply" type="button" disabled>APPLY CUTOFF</button>
+            </div>
+          </section>
+
+          <section id="match-ab" class="match-ab" aria-labelledby="match-ab-title" hidden>
+            <div class="match-ab-heading">
+              <div><p class="eyebrow">LEVEL-MATCHED A / B</p><h3 id="match-ab-title">REFERENCE と CURRENT PATCH</h3></div>
+              <div class="match-ab-controls" role="group" aria-label="音量を揃えたA/B再生">
+                <button id="match-play-a" type="button" aria-pressed="false">A REFERENCE</button>
+                <button id="match-play-b" type="button" aria-pressed="false">B CURRENT</button>
+                <button id="match-stop" type="button">STOP</button>
+              </div>
+            </div>
+            <p id="match-level-note" class="match-level-note">ACTIVE RMS −18 dBFS · PEAK CEILING −1 dBFS</p>
+            <div class="match-differences" aria-label="候補から参照を引いた差">
+              <article><span>ENVELOPE</span><strong id="match-diff-envelope">—</strong><small>correlation</small></article>
+              <article><span>PITCH B−A</span><strong id="match-diff-pitch">—</strong><small>cents</small></article>
+              <article><span>ATTACK B−A</span><strong id="match-diff-attack">—</strong><small>milliseconds</small></article>
+              <article><span>BRIGHTNESS B−A</span><strong id="match-diff-brightness">—</strong><small>derivative proxy</small></article>
+            </div>
+            <p class="match-boundary">数値は差を探す補助であり、音色の一致や完成を保証しません。最終判断は耳で行います。</p>
+          </section>
+        </div>
+
+        <ol class="match-flow" aria-label="音色再現の工程">
+          <li id="match-step-measure" class="is-current"><span>01</span><strong>MEASURE</strong><small>参照音の特徴を測る</small></li>
+          <li id="match-step-candidate"><span>02</span><strong>CANDIDATE</strong><small>現在のcoreを同条件で描画</small></li>
+          <li id="match-step-ab"><span>03</span><strong>A / B</strong><small>音量を揃えて差を測る</small></li>
+          <li id="match-step-refine"><span>04</span><strong>REFINE</strong><small>耳と数値で詰める</small></li>
+        </ol>
+      </section>
     </section>
 
     <section class="keyboard-section" aria-labelledby="keyboard-title">
-      <div class="keyboard-heading"><div><p class="eyebrow">PLAY</p><h2 id="keyboard-title">KEYBOARD</h2></div><p>PC: A W S E D F T G Y H U J K　/　最初の鍵盤操作で音源を開始</p></div>
+      <div class="performance-strip"><div><p class="eyebrow">PERFORMANCE</p><h2 id="keyboard-title">MACROS + KEYBOARD</h2></div><div id="performance-macros" class="performance-macros"></div><p>PC: A W S E D F T G Y H U J K　/　最初の操作でAudioを開始</p></div>
       <div class="piano-scroll"><div id="piano" class="piano" aria-label="C4からC6までの鍵盤"></div></div>
     </section>
-
-    <details class="advanced"><summary>詳細設定 <span>残りのDSPパラメータを表示</span></summary><div id="advanced-controls" class="advanced-controls"></div></details>
   </main>
-  <script type="module" src="./synth-ui.js"></script>
+  <script type="module" src="./synth-ui.js?m4p=1"></script>
 </body>
 </html>

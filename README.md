@@ -31,13 +31,13 @@ JUCE も AGPL か商用ライセンスの二択です。**ライセンスの都�
 
 | | 状態 |
 |---|---|
-| DSPコア | 2オペのウェーブテーブル OSC、ユニゾン最大4声、B→A の位相変調（FM）、サブ、white/pink ノイズ、波形モーフ、TPT/ZDF SVF、ディケイ／リリースのカーブを選べるアンプ／フィルタEG、6波形LFO、6スロットのモジュレーションマトリクス、マクロ2本 |
-| AUv3 プラグイン | `auval` 警告0で通過。パラメータ、状態保存、ファクトリープリセット |
+| DSPコア | 2オペのウェーブテーブル OSC、中心加重デチューン＋等間隔ステレオ配置のユニゾン最大4声、Random / Fixed / Balanced位相開始、Linear / Natural Width、B→A の位相変調（FM）と高域Guard、サブ、white/pink ノイズ、波形モーフ、Morph／FM／Levelの5 ms操作スムージング、TPT/ZDF SVF、アンプ／フィルタEGと独立したMod EG、独立2基の6波形LFO、6スロットのモジュレーションマトリクス、マクロ4本、順序変更できるDistortion / Chorus / 3-band EQ / Compressor |
+| AUv3 プラグイン | `auval` 警告0で通過。パラメータ、状態保存、ファクトリープリセット。共有コアの4 Insertもパラメータ公開済み（M4nの署名・実ホスト確認は未実施） |
 | スタンドアロン | 起動して A〜Z キーで演奏できる |
-| ブラウザ | AudioWorklet でライブ演奏、OfflineAudioContext でオフライン書き出し |
+| ブラウザ | AudioWorkletでライブ演奏、初回出力の安全フェード、エネルギー正規化したReverb IR、フォーカス喪失時のpanic停止、OfflineAudioContextでオフライン書き出し、`?quality=1`の検証画面で4声ユニゾンとFM高域処理を独立比較、Studio画面の`MATCH`で参照音をローカル測定し、根拠付きAMP ENV候補、実測較正したLP12/LP24 Filter Cutoff候補の明示適用と現在のcoreパッチとの音量補正A/B |
 | フィルタ | 12/24 dB の SVF（LP/BP/HP/Notch）、キートラック、専用エンベロープ |
-| LFO | 6波形、フリーラン／ノートで頭出し、カットオフ・ピッチ・音量への直結とマトリクス入力 |
-| モジュレーションマトリクス | 7信号源 × 13送り先、6スロット固定。マクロ2本はパラメータ／`SYNTH_EV_MACRO` から5 ms平滑化つきで操作可能 |
+| LFO | 2基とも6波形、フリーラン／ノートで頭出し。LFO 1はカットオフ・ピッチ・音量への直結とMatrix入力、LFO 2は独立したMatrix入力 |
+| モジュレーションマトリクス | 11信号源 × 13送り先、6スロット固定。Macro 1〜4とMod EGを選択でき、マクロ4本はパラメータ／`SYNTH_EV_MACRO` から5 ms平滑化つきで操作可能 |
 
 ## 実測値（Apple M4 Pro / macOS 26.5.2）
 
@@ -46,23 +46,24 @@ JUCE も AGPL か商用ライセンスの二択です。**ライセンスの都�
 | 測定 | 結果 |
 |---|---|
 | **AU と CLI の出力** | **ビット一致**（ベロシティが MIDI の7bitで表せる値のとき） |
-| **wasm と native の出力** | **ビット一致**（8プリセットで確認。`-ffp-contract=off` が必須） |
+| **wasm と native の出力** | **ビット一致**（全18プリセット＋4 Insert有効fixtureで確認。`-ffp-contract=off` が必須） |
 | ブロックサイズ不変性 | block 1／7／64／128／511 でビット一致 |
 | サンプルレート | 44.1／48／96 kHz すべてで NaN・Inf ゼロ |
-| 処理時間 | 6スロット・LP24・LFO・16音 × ユニゾン4で平均 234.76 µs・p99 265.88 µs（48 kHz / 128 frames、期限の50%は1333.5 µs） |
-| エイリアス | ノコギリ波 C8 で −96.2 dB、FM 全開で −94.3 dB |
+| 処理時間 | 6スロット・LP24・LFO・16音 × ユニゾン4に4 Insertを加えて平均 281.27 µs・p99 369.00 µs（48 kHz / 128 frames、期限の50%は1333.5 µs） |
+| ユニゾン | 2／3／4声のRMS差は1声比 +0.04／+0.43／+0.38 dB。4声full widthの左右差 0.006 dB、width 0は左右ビット一致 |
+| エイリアス | ノコギリ波 C8 で −96.2 dB、FM C5全開で −94.3 dB。C8のFM off-grid fold指標はLegacy +9.11 dB → HQ −23.60 dB（32.71 dB改善） |
 | フィルタ | −3 dB点の最大誤差 0.342%、LP12 −11.94 dB/oct、LP24 −23.88 dB/oct、resonance 0.8 のピーク差 +13.82 dB、キートラック 1oct で 2.003 倍 |
 | 共振の実挙動 | resonance 1（Q=100）でカットオフ周波数にリンギングし 136 dB/秒 で減衰。**理論値と一致**（持続的な自己発振はしない） |
 | LFO | 6波形とも周期誤差 0%、S&H再レンダーはビット一致。設定 5 Hz で明るさが実測 毎秒 5.0 回変化 |
-| wasm サイズ | 43,871 バイト（gzip 13,433 バイト） |
-| 自動テスト | 48項目すべて PASS |
+| wasm サイズ | 71,784 バイト（gzip 20,286 バイト） |
+| 自動テスト | Web 62項目、core 71項目すべて PASS |
 
 ## 動かす
 
 必要なもの: Xcode（clang / swiftc）、GNU make、Node.js。WASM を作るなら `brew install llvm lld`。
 
 ```bash
-make test                 # コアの自動テスト48項目
+make test                 # コアの自動テスト71項目
 make cli                  # オフラインレンダラー
 ./build/render-cli --preset presets/m1_unison_saw.txt --events fixtures/m0_events_chord.txt \
     --out build/out.wav --sr 48000 --block 128 --frames 96000
@@ -82,7 +83,10 @@ bash shells/apple/build.sh    # AUv3 + スタンドアロン（署名IDは自動
 auval -v aumu Sken Arat       # AU の検証
 
 node tools/serve.mjs          # ブラウザ版 → http://127.0.0.1:8963/shells/web/demo.html
+node tools/analyze-sound.mjs design/verify/ref/rsk_epiano.wav  # 参照音の測定JSON
 ```
+
+ブラウザで演奏する公開版: [SynthEngine Web Synth](https://aratama-ship-it.github.io/synth-engine/)
 
 詳しくは [docs_BUILD.md](docs_BUILD.md)（コアの入出力形式・テスト項目・未決事項）、
 [shells/apple/README_apple.md](shells/apple/README_apple.md)（AUv3 の作り方と落とし穴）、

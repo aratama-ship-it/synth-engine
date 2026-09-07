@@ -389,8 +389,11 @@ NSError* makeError(NSInteger code, NSString* description) {
 }
 
 - (NSTimeInterval)tailTime {
-    return static_cast<NSTimeInterval>(
+    const NSTimeInterval release = static_cast<NSTimeInterval>(
         _renderContext->parameterValues[6].load(std::memory_order_relaxed));
+    const bool chorusEnabled = _renderContext->parameterCount > 94u &&
+        _renderContext->parameterValues[94].load(std::memory_order_relaxed) >= 0.5f;
+    return release + (chorusEnabled ? 0.022 : 0.0);
 }
 
 - (BOOL)allocateRenderResourcesAndReturnError:(NSError**)outError {

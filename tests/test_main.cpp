@@ -180,8 +180,8 @@ static uint64_t fnv1a64_pcm_stereo(const StereoRender& output) {
 // この値は `-ffp-contract=off` を付けた状態のもの。コンパイル指定や DSP を変えると当然変わる。
 // 意図した変更なら、変更内容を commit メッセージに書いたうえでこの値を更新する。
 static constexpr uint64_t kGoldenM0ChordHash = UINT64_C(0xfa4784bb6553b535);
-static constexpr uint64_t kGoldenM1ListenChordHash = UINT64_C(0x7ff4dcd69776c37e);
-static constexpr uint64_t kGoldenM1ChordHash = UINT64_C(0x92e5ccb9589b59ef);
+static constexpr uint64_t kGoldenM1ListenChordHash = UINT64_C(0xfda17e66d3f526c8);
+static constexpr uint64_t kGoldenM1ChordHash = UINT64_C(0x43acd25c24f79f04);
 static constexpr uint64_t kGoldenM1bChordHash = UINT64_C(0x2ebfef2c5e4a2491);
 static constexpr uint64_t kGoldenM1cChordHash = UINT64_C(0x968d90cecb2ef559);
 
@@ -562,19 +562,26 @@ static bool test_unison_determinism() {
 }
 
 static bool test_unison_loudness() {
-    std::vector<Parameters> oneParams = clean_analysis_params();
-    oneParams.insert(oneParams.end(), {{9, 1.0f}, {10, 10.0f}, {11, 0.5f}});
-    std::vector<Parameters> fourParams = oneParams;
-    fourParams.push_back({9, 4.0f});
+    std::vector<Parameters> params = clean_analysis_params();
+    params.insert(params.end(), {{10, 10.0f}, {11, 0.5f}});
     const std::vector<TimedEvent> events = {{0, SYNTH_EV_NOTE_ON, 32, 60.0f, 1.0f}};
-    const StereoRender one = render_stereo(48000, 128, 96000, events, oneParams, 7u);
-    const StereoRender four = render_stereo(48000, 128, 96000, events, fourParams, 7u);
-    const double rmsOne = stereo_rms(one, 24000, 72000);
-    const double rmsFour = stereo_rms(four, 24000, 72000);
-    const double differenceDb = 20.0 * std::log10(rmsFour / rmsOne);
-    const bool ok = std::isfinite(differenceDb) && std::fabs(differenceDb) <= 3.0;
-    std::printf("%s 10 unison loudness: rms_u1=%.9f rms_u4=%.9f difference_db=%.6f limit_db=3.000000\n",
-                ok ? "PASS" : "FAIL", rmsOne, rmsFour, differenceDb);
+    double rms[4]{};
+    double differenceDb[4]{};
+    bool ok = true;
+    for (uint32_t count = 1; count <= 4; ++count) {
+        std::vector<Parameters> configured = params;
+        configured.push_back({9, static_cast<float>(count)});
+        const StereoRender output = render_stereo(
+            48000, 128, 96000, events, configured, 7u);
+        rms[count - 1] = stereo_rms(output, 24000, 72000);
+        differenceDb[count - 1] = count == 1 ? 0.0 :
+            20.0 * std::log10(rms[count - 1] / rms[0]);
+        ok = ok && std::isfinite(differenceDb[count - 1]) &&
+            std::fabs(differenceDb[count - 1]) <= 2.0;
+    }
+    std::printf("%s 10 unison loudness: rms_u1=%.9f differences_db=%.6f,%.6f,%.6f limit_db=2.000000\n",
+                ok ? "PASS" : "FAIL", rms[0], differenceDb[1],
+                differenceDb[2], differenceDb[3]);
     return ok;
 }
 
@@ -622,17 +629,26 @@ static double channel_correlation(const StereoRender& output, size_t start, size
 
 static bool test_unison_pan() {
     std::vector<Parameters> wideParams = clean_analysis_params();
-    wideParams.insert(wideParams.end(), {{9, 2.0f}, {10, 50.0f}, {11, 1.0f}});
+    wideParams.insert(wideParams.end(), {{9, 4.0f}, {10, 20.0f}, {11, 1.0f}});
     std::vector<Parameters> monoParams = wideParams;
     monoParams.push_back({11, 0.0f});
     const std::vector<TimedEvent> events = {{0, SYNTH_EV_NOTE_ON, 34, 60.0f, 1.0f}};
-    const StereoRender wide = render_stereo(48000, 128, 48000, events, wideParams, 11u);
-    const StereoRender mono = render_stereo(48000, 128, 48000, events, monoParams, 11u);
-    const double correlation = channel_correlation(wide, 4096, 40000);
+    const StereoRender wide = render_stereo(48000, 128, 96000, events, wideParams, 11u);
+    const StereoRender mono = render_stereo(48000, 128, 96000, events, monoParams, 11u);
+    const double correlation = channel_correlation(wide, 12000, 72000);
     const size_t monoMismatch = bit_mismatches(mono.left, mono.right);
-    const bool ok = std::isfinite(correlation) && correlation < 0.99 && monoMismatch == 0;
-    std::printf("%s 12 pan: width1_correlation=%.9f width0_bit_mismatches=%zu\n",
-                ok ? "PASS" : "FAIL", correlation, monoMismatch);
+    double leftPower = 0.0;
+    double rightPower = 0.0;
+    for (size_t i = 12000; i < 84000; ++i) {
+        leftPower += static_cast<double>(wide.left[i]) * static_cast<double>(wide.left[i]);
+        rightPower += static_cast<double>(wide.right[i]) * static_cast<double>(wide.right[i]);
+    }
+    const double balanceDb = 10.0 * std::log10(leftPower / rightPower);
+    const bool ok = std::isfinite(correlation) && correlation < 0.95 &&
+                    std::isfinite(balanceDb) && std::fabs(balanceDb) <= 1.0 &&
+                    monoMismatch == 0;
+    std::printf("%s 12 pan: voices=4 width1_correlation=%.9f balance_db=%.6f width0_bit_mismatches=%zu\n",
+                ok ? "PASS" : "FAIL", correlation, balanceDb, monoMismatch);
     return ok;
 }
 
@@ -816,16 +832,16 @@ static bool test_pink_noise_slope() {
 }
 
 static bool test_parameter_sweep() {
-    static constexpr float values[76][3] = {
+    static constexpr float values[synth::kParamCount][3] = {
         {0.0f, 0.0f, 3.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.8f, 4.0f},
         {0.0f, 0.005f, 60.0f}, {0.0f, 0.1f, 60.0f}, {0.0f, 0.8f, 1.0f},
         {0.0f, 0.2f, 60.0f}, {0.0f, 0.2f, 4.0f}, {1.0f, 16.0f, 16.0f},
         {1.0f, 1.0f, 4.0f}, {0.0f, 10.0f, 50.0f}, {0.0f, 0.5f, 1.0f},
         {-2.0f, 0.0f, 2.0f}, {-12.0f, 0.0f, 12.0f}, {-100.0f, 0.0f, 100.0f},
-        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 3.0f},
+        {0.0f, 0.0f, 2.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 3.0f},
         {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 4.0f}, {1.0f, 1.0f, 4.0f},
         {0.0f, 10.0f, 50.0f}, {0.0f, 0.5f, 1.0f}, {-2.0f, 0.0f, 2.0f},
-        {-12.0f, 0.0f, 12.0f}, {-100.0f, 0.0f, 100.0f}, {0.0f, 0.0f, 1.0f},
+        {-12.0f, 0.0f, 12.0f}, {-100.0f, 0.0f, 100.0f}, {0.0f, 0.0f, 2.0f},
         {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 4.0f},
         {0.0f, 0.0f, 2.0f}, {-2.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 4.0f},
         {0.0f, 0.0f, 1.0f}, {0.0f, 0.05f, 60.0f},
@@ -836,18 +852,24 @@ static bool test_parameter_sweep() {
         {0.0f, 0.0f, 5.0f}, {0.0f, 0.0f, 1.0f}, {-8.0f, 0.0f, 8.0f},
         {-1200.0f, 0.0f, 1200.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
         {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 7.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 7.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 7.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 7.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 7.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 7.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}
+        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
+        {0.01f, 0.25f, 40.0f}, {0.0f, 1.0f, 5.0f},
+        {0.0f, 0.0f, 1.0f}, {0.0f, 0.25f, 1.0f},
+        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
+        {0.0f, 0.005f, 20.0f}, {0.0f, 0.2f, 20.0f},
+        {0.0f, 0.0f, 1.0f}, {0.0f, 0.2f, 20.0f}, {0.0f, 0.0f, 1.0f}
     };
     uint64_t nonFinite = 0;
     double peak = 0.0;
     uint32_t renders = 0;
-    for (uint32_t id = 0; id < 76; ++id) {
+    for (uint32_t id = 0; id < synth::kParamCount; ++id) {
         for (uint32_t choice = 0; choice < 3; ++choice) {
             std::vector<Parameters> params = {
                 {3, 0.0f}, {4, 0.0f}, {5, 1.0f}, {6, 0.01f}, {7, 0.2f},
@@ -867,7 +889,8 @@ static bool test_parameter_sweep() {
             ++renders;
         }
     }
-    const bool ok = renders == 228 && nonFinite == 0 && peak <= 8.0 && synth_engine_version() == 8;
+    const bool ok = renders == synth::kParamCount * 3u && nonFinite == 0 &&
+                    peak <= 8.0 && synth_engine_version() == 15;
     std::printf("%s 19 parameter sweep: renders=%u nan_inf=%llu peak=%.9f limit=8.000000 version=%u\n",
                 ok ? "PASS" : "FAIL", renders,
                 static_cast<unsigned long long>(nonFinite), peak, synth_engine_version());
@@ -1435,7 +1458,7 @@ static bool test_m1b_performance() {
 static bool test_curve_zero_golden_and_metadata() {
     const uint32_t count = synth_param_count();
     std::vector<SynthParamInfo> parameters(count);
-    bool metadataValid = count == 76;
+    bool metadataValid = count == 113;
     for (uint32_t id = 0; id < count; ++id) {
         SynthParamInfo& parameter = parameters[id];
         metadataValid = metadataValid && synth_param_info(id, &parameter) == 0;
@@ -1763,7 +1786,7 @@ static bool test_m1c_bypass_golden() {
 static bool test_modulation_sources() {
     constexpr uint32_t frames = 24000;
     const std::vector<TimedEvent> note = {{0, SYNTH_EV_NOTE_ON, 601, 60.0f, 1.0f}};
-    double effects[7]{};
+    double effects[11]{};
 
     std::vector<Parameters> lfoBase = modulation_analysis_params();
     const StereoRender lfoReference = render_stereo(48000, 128, frames, note, lfoBase, 211u);
@@ -1818,24 +1841,134 @@ static bool test_modulation_sources() {
         c7Reference, 0, frames);
     effects[4] = std::max(std::fabs(c1Db), std::fabs(c7Db));
 
-    for (uint32_t macro = 0; macro < 2; ++macro) {
+    static constexpr uint32_t macroSources[4] = {6u, 7u, 9u, 10u};
+    static constexpr uint32_t macroParams[4] = {73u, 74u, 83u, 84u};
+    for (uint32_t macro = 0; macro < 4; ++macro) {
         std::vector<Parameters> macroZero = modulation_analysis_params();
-        add_mod_slot(macroZero, 0, 6u + macro, 1, 1.0f);
+        add_mod_slot(macroZero, 0, macroSources[macro], 1, 1.0f);
         std::vector<Parameters> macroOne = macroZero;
-        macroOne.push_back({73u + macro, 1.0f});
+        macroOne.push_back({macroParams[macro], 1.0f});
         const StereoRender zero = render_stereo(48000, 128, frames, note, macroZero, 233u + macro);
         const StereoRender one = render_stereo(48000, 128, frames, note, macroOne, 233u + macro);
         effects[5u + macro] = rms_difference_db(one, zero, 0, frames);
     }
+
+    std::vector<Parameters> lfo2Base = modulation_analysis_params();
+    lfo2Base.insert(lfo2Base.end(), {{79, 3.0f}, {80, 4.0f}, {82, 0.0f}});
+    const StereoRender lfo2Reference = render_stereo(48000, 128, frames, note, lfo2Base, 239u);
+    add_mod_slot(lfo2Base, 0, 8, 1, 1.0f);
+    effects[9] = rms_difference_db(
+        render_stereo(48000, 128, frames, note, lfo2Base, 239u), lfo2Reference, 0, frames);
+
+    std::vector<Parameters> modEnvBase = modulation_analysis_params();
+    modEnvBase.insert(modEnvBase.end(), {{2, 0.0f}, {85, 0.0f}, {86, 0.0f}, {87, 1.0f}});
+    const StereoRender modEnvReference = render_stereo(48000, 128, frames, note, modEnvBase, 241u);
+    add_mod_slot(modEnvBase, 0, 11, 1, 1.0f);
+    effects[10] = rms_difference_db(
+        render_stereo(48000, 128, frames, note, modEnvBase, 241u), modEnvReference, 0, frames);
 
     bool sourceEffects = true;
     for (double effect : effects) sourceEffects = sourceEffects && std::fabs(effect) >= 1.0;
     const bool ok = sourceEffects && velocityRatio >= 3.5 && velocityRatio <= 4.5 &&
                     c1Db < -1.0 && c7Db > 1.0;
     std::printf("%s 43 sources: LFO=%.3fdB ampEG=%.3fdB filterEG=%.3fdB velocity=%.3fdB "
-                "velocity_ratio=%.6f note_C1=%.3fdB note_C7=%.3fdB macro1=%.3fdB macro2=%.3fdB\n",
+                "velocity_ratio=%.6f note_C1=%.3fdB note_C7=%.3fdB macro1=%.3fdB macro2=%.3fdB macro3=%.3fdB macro4=%.3fdB LFO2=%.3fdB modEG=%.3fdB\n",
                 ok ? "PASS" : "FAIL", effects[0], effects[1], effects[2], effects[3],
-                velocityRatio, c1Db, c7Db, effects[5], effects[6]);
+                velocityRatio, c1Db, c7Db, effects[5], effects[6], effects[7], effects[8],
+                effects[9], effects[10]);
+    return ok;
+}
+
+static bool test_lfo2_independent_state() {
+    constexpr double sampleRate = 48000.0;
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), sampleRate, 1200);
+    if (engine == nullptr ||
+        synth_set_param(engine, 46, 2.0f) != 0 ||
+        synth_set_param(engine, 52, 0.1f) != 0 ||
+        synth_set_param(engine, 79, 0.5f) != 0 ||
+        synth_set_param(engine, 81, 1.0f) != 0 ||
+        synth_set_param(engine, 82, 0.25f) != 0) return false;
+    synth_reset(engine, SYNTH_RESET_VOICES, 241u);
+    const float firstLfoHold = engine->globalLfoHold;
+    const float firstLfo2Hold = engine->globalLfo2Hold;
+    synth_reset(engine, SYNTH_RESET_VOICES, 241u);
+    const bool holdsDeterministic = engine->globalLfoHold == firstLfoHold &&
+        engine->globalLfo2Hold == firstLfo2Hold && firstLfoHold != firstLfo2Hold;
+    const double initialLfoPhase = engine->globalLfoPhase;
+    const double initialLfo2Phase = engine->globalLfo2Phase;
+
+    float left[1200]{};
+    float right[1200]{};
+    const SynthEvent firstNote{0, SYNTH_EV_NOTE_ON, 611, 60.0f, 1.0f};
+    if (synth_process(engine, &firstNote, 1, left, right, 1200) != 0) return false;
+    const SynthEvent secondNote{0, SYNTH_EV_NOTE_ON, 612, 64.0f, 1.0f};
+    if (synth_process(engine, &secondNote, 1, left, right, 1) != 0) return false;
+
+    const synth::Voice* first = nullptr;
+    const synth::Voice* second = nullptr;
+    for (uint32_t index = 0; index < engine->voiceLimit; ++index) {
+        if (engine->voices[index].noteId == 611u) first = &engine->voices[index];
+        if (engine->voices[index].noteId == 612u) second = &engine->voices[index];
+    }
+    const double expectedLfo = initialLfoPhase + 2.0 * 1201.0 / sampleRate;
+    const double expectedLfo2 = initialLfo2Phase + 0.5 * 1201.0 / sampleRate;
+    const bool independentRates = std::fabs(engine->globalLfoPhase - expectedLfo) < 1.0e-10 &&
+        std::fabs(engine->globalLfo2Phase - expectedLfo2) < 1.0e-10;
+    const bool perVoiceRetrigger = first != nullptr && second != nullptr &&
+        first->lfo2Phase > second->lfo2Phase + 0.01 &&
+        std::fabs(second->lfo2Phase - (initialLfo2Phase + 0.5 / sampleRate)) < 1.0e-10;
+    const bool ok = holdsDeterministic && independentRates && perVoiceRetrigger;
+    std::printf("%s 67 LFO2 independent state: global_phase=%.9f/%.9f holds_distinct=%d retrigger_delta=%.9f\n",
+                ok ? "PASS" : "FAIL", engine->globalLfoPhase, engine->globalLfo2Phase,
+                firstLfoHold != firstLfo2Hold,
+                first != nullptr && second != nullptr ? first->lfo2Phase - second->lfo2Phase : 0.0);
+    return ok;
+}
+
+static bool test_mod_envelope_state() {
+    constexpr double sampleRate = 1000.0;
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), sampleRate, 128);
+    if (engine == nullptr ||
+        synth_set_param(engine, 3, 0.0f) != 0 ||
+        synth_set_param(engine, 4, 0.0f) != 0 ||
+        synth_set_param(engine, 5, 1.0f) != 0 ||
+        synth_set_param(engine, 6, 1.0f) != 0 ||
+        synth_set_param(engine, 85, 0.01f) != 0 ||
+        synth_set_param(engine, 86, 0.02f) != 0 ||
+        synth_set_param(engine, 87, 0.25f) != 0 ||
+        synth_set_param(engine, 88, 0.01f) != 0 ||
+        synth_set_param(engine, 89, 1.0f) != 0) return false;
+    synth_reset(engine, SYNTH_RESET_VOICES, 263u);
+
+    float left = 0.0f;
+    float right = 0.0f;
+    const SynthEvent noteOn{0, SYNTH_EV_NOTE_ON, 613, 60.0f, 1.0f};
+    if (synth_process(engine, &noteOn, 1, &left, &right, 1) != 0) return false;
+    const float attackFirst = engine->voices[0].modEnvelope;
+    if (!process_empty_frames(engine, 9)) return false;
+    const bool reachedDecay = engine->voices[0].modStage == synth::kEnvDecay &&
+                              engine->voices[0].modEnvelope == 1.0f;
+    if (!process_empty_frames(engine, 10)) return false;
+    const float decayHalf = engine->voices[0].modEnvelope;
+    if (!process_empty_frames(engine, 10)) return false;
+    const bool reachedSustain = engine->voices[0].modStage == synth::kEnvSustain &&
+                                std::fabs(engine->voices[0].modEnvelope - 0.25f) < 1.0e-6f;
+
+    const SynthEvent noteOff{0, SYNTH_EV_NOTE_OFF, 613, 0.0f, 0.0f};
+    if (synth_process(engine, &noteOff, 1, &left, &right, 1) != 0) return false;
+    if (!process_empty_frames(engine, 4)) return false;
+    const float releaseHalf = engine->voices[0].modEnvelope;
+    if (!process_empty_frames(engine, 5)) return false;
+    const bool released = engine->voices[0].active != 0 &&
+                          engine->voices[0].modStage == synth::kEnvOff &&
+                          engine->voices[0].modEnvelope == 0.0f;
+    const bool ok = std::fabs(attackFirst - 0.1f) < 1.0e-6f && reachedDecay &&
+                    std::fabs(decayHalf - 0.625f) < 1.0e-5f && reachedSustain &&
+                    std::fabs(releaseHalf - 0.125f) < 1.0e-5f && released;
+    std::printf("%s 68 mod envelope: attack_first=%.6f decay_half=%.6f sustain=%.6f release_half=%.6f released=%d\n",
+                ok ? "PASS" : "FAIL", attackFirst, decayHalf, 0.25f, releaseHalf, released);
     return ok;
 }
 
@@ -1962,13 +2095,20 @@ static bool test_macro_event() {
     for (uint32_t i = 1; i < 240; ++i)
         if (synth_process(engine, nullptr, 0, &left, &right, 1) != 0) return false;
     const double atFiveMs = engine->macroSmoothed[0];
-    const SynthEvent invalid{0, SYNTH_EV_MACRO, 2, 0.5f, 0.0f};
+    const SynthEvent macro3{0, SYNTH_EV_MACRO, 2, 0.75f, 0.0f};
+    const SynthEvent macro4{0, SYNTH_EV_MACRO, 3, 0.5f, 0.0f};
+    const int macro3Accepted = synth_process(engine, &macro3, 1, &left, &right, 1);
+    const int macro4Accepted = synth_process(engine, &macro4, 1, &left, &right, 1);
+    const SynthEvent invalid{0, SYNTH_EV_MACRO, 4, 0.5f, 0.0f};
     const int invalidIgnored = synth_process(engine, &invalid, 1, &left, &right, 1);
     const bool ok = beforeRms == 0.0 && afterRms > 0.01 && before == 0.0 &&
                     immediate > 0.0 && atFiveMs >= 0.62 && atFiveMs <= 0.65 &&
+                    macro3Accepted == 0 && macro4Accepted == 0 &&
+                    engine->macroSmoothed[2] > 0.0 && engine->macroSmoothed[3] > 0.0 &&
                     invalidIgnored == 1;
-    std::printf("%s 46 macro event: before_rms=%.9f after_rms=%.9f immediate=%.9f at_5ms=%.9f invalid_ignored=%d\n",
-                ok ? "PASS" : "FAIL", beforeRms, afterRms, immediate, atFiveMs, invalidIgnored);
+    std::printf("%s 46 macro event: before_rms=%.9f after_rms=%.9f immediate=%.9f at_5ms=%.9f macro3=%.9f macro4=%.9f invalid_ignored=%d\n",
+                ok ? "PASS" : "FAIL", beforeRms, afterRms, immediate, atFiveMs,
+                engine->macroSmoothed[2], engine->macroSmoothed[3], invalidIgnored);
     return ok;
 }
 
@@ -2498,6 +2638,462 @@ static bool test_voice_param_performance() {
     return ok;
 }
 
+static bool test_builtin_wavetable_palette() {
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 128);
+    if (engine == nullptr) return false;
+    SynthParamInfo oscAInfo{};
+    SynthParamInfo oscBInfo{};
+    const bool selectorsDiscrete = synth_param_info(0, &oscAInfo) == 0 &&
+        synth_param_info(17, &oscBInfo) == 0 &&
+        (oscAInfo.flags & SYNTH_PARAM_FLAG_INTEGER) != 0u &&
+        (oscBInfo.flags & SYNTH_PARAM_FLAG_INTEGER) != 0u;
+    bool framesValid = true;
+    bool finite = true;
+    double smallestDifferenceRms = 1.0e9;
+    double largestPeakError = 0.0;
+    for (uint32_t slot = 0; slot < synth::kWavetableSlots; ++slot) {
+        framesValid = framesValid &&
+            engine->wavetable.frameCount[slot] == synth::kMaxWavetableFrames;
+        for (uint32_t frame = 0; frame < synth::kMaxWavetableFrames; ++frame)
+            for (uint32_t mip = 0; mip < synth::kMipLevels; ++mip)
+                for (uint32_t i = 0; i < synth::kTableSize; ++i)
+                    finite = finite &&
+                        std::isfinite(engine->wavetable.samples[slot][frame][mip][i]);
+        if (slot == 0u) continue;
+        double differencePower = 0.0;
+        double firstPeak = 0.0;
+        double lastPeak = 0.0;
+        for (uint32_t i = 0; i < synth::kTableSize; ++i) {
+            const double first = engine->wavetable.samples[slot][0][0][i];
+            const double last = engine->wavetable.samples[slot][3][0][i];
+            const double difference = last - first;
+            differencePower += difference * difference;
+            firstPeak = std::max(firstPeak, std::fabs(first));
+            lastPeak = std::max(lastPeak, std::fabs(last));
+        }
+        smallestDifferenceRms = std::min(
+            smallestDifferenceRms,
+            std::sqrt(differencePower / static_cast<double>(synth::kTableSize)));
+        largestPeakError = std::max(
+            largestPeakError, std::fabs(lastPeak / firstPeak - 1.0));
+    }
+    const bool ok = selectorsDiscrete && framesValid && finite && smallestDifferenceRms >= 0.25 &&
+                    largestPeakError <= 1.0e-5 && synth_engine_version() == 15;
+    std::printf("%s 61 builtin wavetable palette: slots=4 frames=4 selectors=integer min_endpoint_diff_rms=%.6f max_peak_error=%.9f version=%u\n",
+                ok ? "PASS" : "FAIL", smallestDifferenceRms, largestPeakError,
+                synth_engine_version());
+    return ok;
+}
+
+static bool test_wavetable_mip_crossfade() {
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 128);
+    if (engine == nullptr) return false;
+    constexpr double boundaryHz = 750.0;  // 48 kHz Nyquist / 32 harmonics.
+    constexpr double below = boundaryHz * (1.0 - 1.0e-6);
+    constexpr double above = boundaryHz * (1.0 + 1.0e-6);
+    double hardJump = 0.0;
+    double smoothJump = 0.0;
+    for (uint32_t i = 0; i < synth::kTableSize; ++i) {
+        const double phase = static_cast<double>(i) / static_cast<double>(synth::kTableSize);
+        const float hardBelow = synth::read_wavetable(&engine->wavetable, 1u, 0.0f,
+            synth::select_mip(below, 48000.0), phase);
+        const float hardAbove = synth::read_wavetable(&engine->wavetable, 1u, 0.0f,
+            synth::select_mip(above, 48000.0), phase);
+        const float smoothBelow = synth::read_wavetable_bandlimited(
+            &engine->wavetable, 1u, 0.0f, below, 48000.0, phase);
+        const float smoothAbove = synth::read_wavetable_bandlimited(
+            &engine->wavetable, 1u, 0.0f, above, 48000.0, phase);
+        hardJump = std::max(hardJump,
+            std::fabs(static_cast<double>(hardBelow) - static_cast<double>(hardAbove)));
+        smoothJump = std::max(smoothJump,
+            std::fabs(static_cast<double>(smoothBelow) - static_cast<double>(smoothAbove)));
+    }
+    const double reductionDb = 20.0 * std::log10(
+        std::max(smoothJump, 1.0e-30) / std::max(hardJump, 1.0e-30));
+    const double outsideFrequency = boundaryHz / 1.1;
+    const uint32_t outsideMip = synth::select_mip(outsideFrequency, 48000.0);
+    bool outsideIdentical = true;
+    for (uint32_t i = 0; i < synth::kTableSize; ++i) {
+        const double phase = static_cast<double>(i) / static_cast<double>(synth::kTableSize);
+        outsideIdentical = outsideIdentical &&
+            synth::read_wavetable(&engine->wavetable, 1u, 0.0f, outsideMip, phase) ==
+            synth::read_wavetable_bandlimited(
+                &engine->wavetable, 1u, 0.0f, outsideFrequency, 48000.0, phase);
+    }
+    const bool ok = synth::select_mip(below, 48000.0) == 5u &&
+                    synth::select_mip(above, 48000.0) == 6u && hardJump > 1.0e-4 &&
+                    reductionDb <= -20.0 && outsideIdentical;
+    std::printf("%s 62 mip crossfade: boundary_hz=%.3f hard_jump=%.9f smooth_jump=%.9f reduction_db=%.3f outside_bit_match=%u\n",
+                ok ? "PASS" : "FAIL", boundaryHz, hardJump, smoothJump, reductionDb,
+                outsideIdentical ? 1u : 0u);
+    return ok;
+}
+
+static bool test_realtime_control_smoothing() {
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 128);
+    if (engine == nullptr) return false;
+    constexpr uint32_t ids[synth::kControlSmoothingCount] = {
+        1u, 2u, 7u, 18u, 19u, 28u, 29u, 32u
+    };
+    constexpr float baseline[synth::kControlSmoothingCount] = {
+        0.1f, 0.2f, 0.2f, 0.1f, 0.2f, 0.1f, 0.2f, 0.2f
+    };
+    constexpr float target[synth::kControlSmoothingCount] = {
+        0.9f, 0.9f, 0.9f, 0.9f, 0.9f, 0.9f, 0.9f, 0.9f
+    };
+    bool idleSnaps = true;
+    for (uint32_t i = 0; i < synth::kControlSmoothingCount; ++i) {
+        idleSnaps = idleSnaps && synth_set_param(engine, ids[i], baseline[i]) == 0 &&
+            engine->controlSmoothed[i] == static_cast<double>(baseline[i]);
+    }
+    const SynthEvent note{0u, SYNTH_EV_NOTE_ON, 900u, 60.0f, 1.0f};
+    float left[128]{};
+    float right[128]{};
+    if (synth_process(engine, &note, 1u, left, right, 1u) != 0) return false;
+    bool holdsPrevious = true;
+    for (uint32_t i = 0; i < synth::kControlSmoothingCount; ++i) {
+        if (synth_set_param(engine, ids[i], target[i]) != 0) return false;
+        holdsPrevious = holdsPrevious &&
+            engine->controlSmoothed[i] == static_cast<double>(baseline[i]);
+    }
+    if (synth_process(engine, nullptr, 0u, left, right, 1u) != 0) return false;
+    double minimumFirstRatio = 1.0;
+    double maximumFirstRatio = 0.0;
+    bool firstStepBounded = true;
+    for (uint32_t i = 0; i < synth::kControlSmoothingCount; ++i) {
+        const double first = engine->controlSmoothed[i];
+        const double ratio = (first - static_cast<double>(baseline[i])) /
+            static_cast<double>(target[i] - baseline[i]);
+        minimumFirstRatio = std::min(minimumFirstRatio, ratio);
+        maximumFirstRatio = std::max(maximumFirstRatio, ratio);
+        firstStepBounded = firstStepBounded && ratio > 0.003 && ratio < 0.006;
+    }
+    if (!process_empty_frames(engine, 2399u)) return false;
+    double maximumSettledError = 0.0;
+    for (uint32_t i = 0; i < synth::kControlSmoothingCount; ++i) {
+        maximumSettledError = std::max(maximumSettledError,
+            std::fabs(engine->controlSmoothed[i] - static_cast<double>(target[i])));
+    }
+    const bool ok = idleSnaps && holdsPrevious && firstStepBounded &&
+                    maximumSettledError <= 0.0001;
+    std::printf("%s 63 realtime control smoothing: controls=8 first_ratio=%.9f..%.9f settled_max_error=%.9f idle_snap=%u\n",
+                ok ? "PASS" : "FAIL", minimumFirstRatio, maximumFirstRatio,
+                maximumSettledError, idleSnaps ? 1u : 0u);
+    return ok;
+}
+
+static bool test_unison_voice_placement() {
+    bool symmetric = true;
+    bool panMonotonic = true;
+    double maximumMeanError = 0.0;
+    for (uint32_t count = 1; count <= synth::kMaxUnison; ++count) {
+        double detuneSum = 0.0;
+        double panSum = 0.0;
+        for (uint32_t i = 0; i < count; ++i) {
+            const double detune = synth::unison_detune_position(i, count);
+            const double pan = synth::unison_pan_position(i, count);
+            detuneSum += detune;
+            panSum += pan;
+            symmetric = symmetric &&
+                std::fabs(detune + synth::unison_detune_position(count - 1u - i, count)) < 1.0e-12 &&
+                std::fabs(pan + synth::unison_pan_position(count - 1u - i, count)) < 1.0e-12;
+            if (i > 0u)
+                panMonotonic = panMonotonic &&
+                    pan > synth::unison_pan_position(i - 1u, count);
+        }
+        maximumMeanError = std::max(maximumMeanError,
+            std::fabs(detuneSum / static_cast<double>(count)));
+        maximumMeanError = std::max(maximumMeanError,
+            std::fabs(panSum / static_cast<double>(count)));
+    }
+    const double innerDetune = std::fabs(synth::unison_detune_position(1u, 4u));
+    const double innerPan = std::fabs(synth::unison_pan_position(1u, 4u));
+    const bool anchors = synth::unison_detune_position(0u, 4u) == -1.0 &&
+                         synth::unison_detune_position(3u, 4u) == 1.0 &&
+                         std::fabs(innerDetune - 0.2) < 1.0e-12 &&
+                         std::fabs(innerPan - (1.0 / 3.0)) < 1.0e-12;
+    const bool ok = symmetric && panMonotonic && anchors && maximumMeanError < 1.0e-12;
+    std::printf("%s 64 unison placement: detune4=-1,-%.3f,+%.3f,+1 pan_inner=%.6f mean_max_error=%.3g\n",
+                ok ? "PASS" : "FAIL", innerDetune, innerDetune, innerPan,
+                maximumMeanError);
+    return ok;
+}
+
+static bool test_unison_phase_and_width_curves() {
+    bool phaseSymmetric = true;
+    bool phaseMonotonic = true;
+    double phaseMeanError = 0.0;
+    for (uint32_t count = 1; count <= synth::kMaxUnison; ++count) {
+        double sum = 0.0;
+        for (uint32_t i = 0; i < count; ++i) {
+            const double phase = synth::unison_phase_offset(i, count);
+            sum += phase;
+            phaseSymmetric = phaseSymmetric &&
+                std::fabs(phase + synth::unison_phase_offset(count - 1u - i, count)) < 1.0e-12;
+            if (i > 0u)
+                phaseMonotonic = phaseMonotonic &&
+                    phase > synth::unison_phase_offset(i - 1u, count);
+        }
+        phaseMeanError = std::max(phaseMeanError,
+            std::fabs(sum / static_cast<double>(count)));
+    }
+    const bool phaseAnchors =
+        synth::unison_phase_offset(0u, 4u) == -3.0 / 16.0 &&
+        synth::unison_phase_offset(1u, 4u) == -1.0 / 16.0 &&
+        synth::unison_phase_offset(2u, 4u) == 1.0 / 16.0 &&
+        synth::unison_phase_offset(3u, 4u) == 3.0 / 16.0;
+
+    bool widthMonotonic = true;
+    double previous = -1.0;
+    for (uint32_t step = 0; step <= 100; ++step) {
+        const double width = static_cast<double>(step) / 100.0;
+        const double curved = synth::unison_width_amount(width, 1u);
+        widthMonotonic = widthMonotonic && curved >= previous && curved >= 0.0 && curved <= 1.0;
+        previous = curved;
+    }
+    const bool widthEndpoints = synth::unison_width_amount(0.0, 0u) == 0.0 &&
+        synth::unison_width_amount(0.0, 1u) == 0.0 &&
+        synth::unison_width_amount(1.0, 0u) == 1.0 &&
+        synth::unison_width_amount(1.0, 1u) == 1.0;
+    const double linearMid = synth::unison_width_amount(0.5, 0u);
+    const double naturalMid = synth::unison_width_amount(0.5, 1u);
+
+    std::vector<Parameters> balanced = clean_analysis_params();
+    balanced.insert(balanced.end(), {
+        {9, 4.0f}, {10, 18.0f}, {11, 0.65f}, {15, 2.0f}, {16, 0.25f}, {76, 1.0f}
+    });
+    const std::vector<TimedEvent> events = {{0, SYNTH_EV_NOTE_ON, 501, 60.0f, 1.0f}};
+    const StereoRender seedA = render_stereo(48000, 128, 8192, events, balanced, 211u);
+    const StereoRender seedB = render_stereo(48000, 128, 8192, events, balanced, 997u);
+    const size_t seedMismatch = bit_mismatches(seedA.left, seedB.left) +
+                                bit_mismatches(seedA.right, seedB.right);
+    const bool ok = phaseSymmetric && phaseMonotonic && phaseAnchors &&
+                    phaseMeanError < 1.0e-12 && widthMonotonic && widthEndpoints &&
+                    naturalMid > linearMid && seedMismatch == 0;
+    std::printf("%s 65 unison phase/width: phase4=-3/16,-1/16,+1/16,+3/16 mean_error=%.3g width_mid=%.6f->%.6f seed_mismatches=%zu\n",
+                ok ? "PASS" : "FAIL", phaseMeanError, linearMid, naturalMid,
+                seedMismatch);
+    return ok;
+}
+
+static double fm_fold_ratio_db(float midi, float quality) {
+    constexpr uint32_t sampleRate = 48000;
+    constexpr uint32_t fftSize = 4096;
+    const double frequency = 440.0 * std::exp2((static_cast<double>(midi) - 69.0) / 12.0);
+    std::vector<Parameters> params = fm_analysis_params(1.0f);
+    params.push_back({78, quality});
+    const StereoRender output = render_stereo(sampleRate, 128, 32768,
+        {{0, SYNTH_EV_NOTE_ON, 502, midi, 1.0f}}, params, 223u);
+    const std::vector<double> power = spectrum_power(output.left, 16384, fftSize, true);
+    const double fundamentalBin = frequency * fftSize / sampleRate;
+    double expectedPower = 0.0;
+    double aliasPower = 0.0;
+    for (uint32_t bin = 1; bin < power.size(); ++bin) {
+        bool expected = bin <= 8;
+        for (uint32_t harmonic = 1;
+             static_cast<double>(harmonic) * fundamentalBin < power.size(); ++harmonic) {
+            if (std::fabs(static_cast<double>(bin) - harmonic * fundamentalBin) <= 8.0) {
+                expected = true;
+                break;
+            }
+        }
+        if (expected) expectedPower += power[bin];
+        else aliasPower += power[bin];
+    }
+    return 10.0 * std::log10(aliasPower / expectedPower);
+}
+
+static bool test_fm_high_guard() {
+    constexpr double sampleRate = 48000.0;
+    const double lowFrequency = 440.0 * std::exp2((72.0 - 69.0) / 12.0);
+    const double highFrequency = 440.0 * std::exp2((108.0 - 69.0) / 12.0);
+    const float lowDepth = synth::fm_high_guard_depth(
+        1.0f, lowFrequency, lowFrequency, sampleRate);
+    const float highDepth = synth::fm_high_guard_depth(
+        1.0f, highFrequency, highFrequency, sampleRate);
+
+    std::vector<Parameters> legacy = fm_analysis_params(1.0f);
+    std::vector<Parameters> guarded = legacy;
+    guarded.push_back({78, 1.0f});
+    const std::vector<TimedEvent> lowEvents = {{0, SYNTH_EV_NOTE_ON, 503, 72.0f, 1.0f}};
+    const StereoRender lowLegacy = render_stereo(48000, 128, 8192, lowEvents, legacy, 227u);
+    const StereoRender lowGuarded = render_stereo(48000, 128, 8192, lowEvents, guarded, 227u);
+    const size_t lowMismatch = bit_mismatches(lowLegacy.left, lowGuarded.left) +
+                               bit_mismatches(lowLegacy.right, lowGuarded.right);
+    const double legacyFold = fm_fold_ratio_db(108.0f, 0.0f);
+    const double guardedFold = fm_fold_ratio_db(108.0f, 1.0f);
+    const bool ok = lowDepth == 1.0f && highDepth > 0.0f && highDepth < 1.0f &&
+                    lowMismatch == 0 && std::isfinite(legacyFold) &&
+                    std::isfinite(guardedFold) && guardedFold <= legacyFold - 6.0;
+    std::printf("%s 66 FM high guard: depth_C5=%.6f depth_C8=%.6f low_bit_mismatches=%zu fold_db=%.6f->%.6f improvement_db=%.6f\n",
+                ok ? "PASS" : "FAIL", lowDepth, highDepth, lowMismatch,
+                legacyFold, guardedFold, legacyFold - guardedFold);
+    return ok;
+}
+
+static bool stereo_is_finite(const StereoRender& output) {
+    if (output.left.size() != output.right.size() || output.left.empty()) return false;
+    for (size_t frame = 0; frame < output.left.size(); ++frame) {
+        if (!std::isfinite(output.left[frame]) || !std::isfinite(output.right[frame]))
+            return false;
+    }
+    return true;
+}
+
+static bool test_shared_insert_fx() {
+    constexpr uint32_t frames = 24000;
+    const std::vector<TimedEvent> events = {
+        {0, SYNTH_EV_NOTE_ON, 701, 60.0f, 0.85f},
+        {16000, SYNTH_EV_NOTE_OFF, 701, 0.0f, 0.0f}
+    };
+    std::vector<Parameters> base = clean_analysis_params();
+    base.push_back({0, 1.0f});
+    const StereoRender reference = render_stereo(48000, 128, frames, events, base, 271u);
+    const std::vector<std::vector<Parameters>> modules = {
+        {{90, 1.0f}, {91, 0.82f}, {92, 7600.0f}, {93, 0.8f}},
+        {{94, 1.0f}, {95, 1.2f}, {96, 0.8f}, {97, 1.0f}, {98, 0.55f}},
+        {{99, 1.0f}, {100, -9.0f}, {101, 4.0f}, {102, 11.0f}},
+        {{103, 1.0f}, {104, -34.0f}, {105, 8.0f}, {106, 0.002f},
+         {107, 0.08f}, {108, 0.0f}}
+    };
+    size_t changed[4]{};
+    bool finite = stereo_is_finite(reference);
+    for (uint32_t effect = 0; effect < 4; ++effect) {
+        std::vector<Parameters> params = base;
+        params.insert(params.end(), modules[effect].begin(), modules[effect].end());
+        const StereoRender output = render_stereo(48000, 128, frames, events, params, 271u);
+        changed[effect] = bit_mismatches(reference.left, output.left) +
+                          bit_mismatches(reference.right, output.right);
+        finite = finite && stereo_is_finite(output);
+    }
+
+    std::vector<Parameters> ordered = base;
+    ordered.insert(ordered.end(), modules[0].begin(), modules[0].end());
+    ordered.insert(ordered.end(), modules[2].begin(), modules[2].end());
+    const StereoRender defaultOrder = render_stereo(48000, 128, frames, events, ordered, 273u);
+    std::vector<Parameters> reversed = ordered;
+    reversed.insert(reversed.end(), {{109, 2.0f}, {110, 0.0f}, {111, 1.0f}, {112, 3.0f}});
+    const StereoRender reversedOrder = render_stereo(48000, 128, frames, events, reversed, 273u);
+    const size_t orderChanged = bit_mismatches(defaultOrder.left, reversedOrder.left) +
+                                bit_mismatches(defaultOrder.right, reversedOrder.right);
+    std::vector<Parameters> invalid = ordered;
+    invalid.insert(invalid.end(), {{109, 0.0f}, {110, 0.0f}, {111, 0.0f}, {112, 0.0f}});
+    const StereoRender invalidOrder = render_stereo(48000, 128, frames, events, invalid, 273u);
+    const size_t fallbackMismatch = bit_mismatches(defaultOrder.left, invalidOrder.left) +
+                                    bit_mismatches(defaultOrder.right, invalidOrder.right);
+    const bool ok = finite && changed[0] > frames && changed[1] > frames &&
+                    changed[2] > frames && changed[3] > frames &&
+                    orderChanged > frames && fallbackMismatch == 0;
+    std::printf("%s 69 shared insert FX: changed_dist=%zu chorus=%zu eq=%zu comp=%zu order=%zu invalid_fallback_mismatches=%zu finite=%d\n",
+                ok ? "PASS" : "FAIL", changed[0], changed[1], changed[2], changed[3],
+                orderChanged, fallbackMismatch, finite);
+    return ok;
+}
+
+static bool test_insert_fx_block_and_reset() {
+    constexpr uint32_t frames = 12000;
+    const std::vector<TimedEvent> events = {
+        {0, SYNTH_EV_NOTE_ON, 702, 52.0f, 0.9f},
+        {8000, SYNTH_EV_NOTE_OFF, 702, 0.0f, 0.0f}
+    };
+    std::vector<Parameters> params = clean_analysis_params();
+    params.insert(params.end(), {
+        {0, 2.0f}, {90, 1.0f}, {91, 0.6f}, {93, 0.55f},
+        {94, 1.0f}, {95, 0.7f}, {96, 0.7f}, {97, 0.9f}, {98, 0.4f},
+        {99, 1.0f}, {100, 3.0f}, {101, -2.0f}, {102, 4.0f},
+        {103, 1.0f}, {104, -26.0f}, {105, 4.0f}, {108, 1.5f}
+    });
+    const StereoRender block1 = render_stereo(48000, 1, frames, events, params, 277u);
+    const StereoRender block128 = render_stereo(48000, 128, frames, events, params, 277u);
+    const size_t blockMismatch = bit_mismatches(block1.left, block128.left) +
+                                 bit_mismatches(block1.right, block128.right);
+
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000, 128);
+    if (engine == nullptr) return false;
+    for (const Parameters& parameter : params)
+        if (synth_set_param(engine, parameter.id, parameter.value) != 0) return false;
+    synth_reset(engine, SYNTH_RESET_VOICES, 277u);
+    float left[128]{};
+    float right[128]{};
+    const SynthEvent note{0, SYNTH_EV_NOTE_ON, 703, 60.0f, 1.0f};
+    if (synth_process(engine, &note, 1, left, right, 128) != 0) return false;
+    synth_reset(engine, SYNTH_RESET_VOICES, 277u);
+    bool historiesCleared = engine->insertFx.chorusWrite == 0u &&
+        engine->insertFx.chorusPhase[0] == 0.0 && engine->insertFx.chorusPhase[1] == 0.0 &&
+        engine->insertFx.distortionTone[0] == 0.0f && engine->insertFx.distortionTone[1] == 0.0f &&
+        engine->insertFx.eqLow[0] == 0.0f && engine->insertFx.eqLow[1] == 0.0f &&
+        engine->insertFx.eqHighLow[0] == 0.0f && engine->insertFx.eqHighLow[1] == 0.0f &&
+        engine->insertFx.compressorEnvelope == 0.0f;
+    for (uint32_t channel = 0; channel < 2; ++channel)
+        for (uint32_t frame = 0; frame < synth::kChorusDelayCapacity; ++frame)
+            historiesCleared = historiesCleared &&
+                engine->insertFx.chorusDelay[channel][frame] == 0.0f;
+    const uint32_t tail = synth_get_tail_frames(engine);
+    const bool ok = blockMismatch == 0 && historiesCleared && tail == 1536u;
+    std::printf("%s 70 insert FX block/reset: block_mismatches=%zu histories_cleared=%d tail_frames=%u expected=1536\n",
+                ok ? "PASS" : "FAIL", blockMismatch, historiesCleared, tail);
+    return ok;
+}
+
+static bool test_insert_fx_performance() {
+    constexpr uint32_t block = 128;
+    constexpr uint32_t iterations = 1000;
+    constexpr double deadline = 2667.0;
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, block);
+    if (engine == nullptr) return false;
+    std::vector<Parameters> parameters = {
+        {0, 1.0f}, {2, 0.8f}, {3, 0.0f}, {4, 0.0f}, {5, 1.0f}, {7, 0.05f},
+        {8, 16.0f}, {9, 4.0f}, {10, 12.0f}, {11, 0.8f}, {35, 1.0f},
+        {36, 1.0f}, {37, 1400.0f}, {38, 0.65f}, {46, 5.0f}, {49, 3.0f},
+        {90, 1.0f}, {91, 0.55f}, {92, 9000.0f}, {93, 0.45f},
+        {94, 1.0f}, {95, 0.6f}, {96, 0.65f}, {97, 0.85f}, {98, 0.35f},
+        {99, 1.0f}, {100, 2.0f}, {101, -1.0f}, {102, 3.0f},
+        {103, 1.0f}, {104, -24.0f}, {105, 4.0f}, {106, 0.008f},
+        {107, 0.16f}, {108, 1.0f}
+    };
+    add_mod_slot(parameters, 0, 1, 8, 0.25f);
+    add_mod_slot(parameters, 1, 2, 1, 0.1f);
+    add_mod_slot(parameters, 2, 3, 9, 0.1f);
+    add_mod_slot(parameters, 3, 8, 10, 0.05f);
+    add_mod_slot(parameters, 4, 9, 11, 0.1f);
+    add_mod_slot(parameters, 5, 11, 13, 0.25f);
+    for (const Parameters& parameter : parameters)
+        if (synth_set_param(engine, parameter.id, parameter.value) != 0) return false;
+    synth_reset(engine, SYNTH_RESET_VOICES, 281u);
+    SynthEvent notes[16]{};
+    for (uint32_t i = 0; i < 16; ++i)
+        notes[i] = SynthEvent{0, SYNTH_EV_NOTE_ON, 800u + i, 36.0f + i * 2.0f, 0.7f};
+    float left[block]{};
+    float right[block]{};
+    if (synth_process(engine, notes, 16, left, right, block) != 0) return false;
+    for (uint32_t i = 0; i < 100; ++i)
+        if (synth_process(engine, nullptr, 0, left, right, block) != 0) return false;
+    std::vector<double> timings;
+    timings.reserve(iterations);
+    double sum = 0.0;
+    for (uint32_t i = 0; i < iterations; ++i) {
+        const auto start = std::chrono::steady_clock::now();
+        const int result = synth_process(engine, nullptr, 0, left, right, block);
+        const auto stop = std::chrono::steady_clock::now();
+        if (result != 0) return false;
+        const double micros = std::chrono::duration<double, std::micro>(stop - start).count();
+        timings.push_back(micros);
+        sum += micros;
+    }
+    std::sort(timings.begin(), timings.end());
+    const double average = sum / iterations;
+    const double p99 = timings[static_cast<size_t>(iterations * 0.99)];
+    const bool ok = std::isfinite(average) && std::isfinite(p99) && p99 < deadline * 0.5;
+    std::printf("%s 71 insert FX performance: slots=6 voices=16 unison=4 LP24 all_inserts average_us=%.6f p99_us=%.6f half_deadline_us=%.6f\n",
+                ok ? "PASS" : "FAIL", average, p99, deadline * 0.5);
+    return ok;
+}
+
 int main() {
     uint32_t passed = 0;
     passed += test_block_invariance();
@@ -2560,6 +3156,17 @@ int main() {
     passed += test_voice_param_same_offset_bundles();
     passed += test_voice_param_cross_block_bundle();
     passed += test_note_instance_ids();
-    std::printf("SUMMARY passed=%u failed=%u total=60\n", passed, 60u - passed);
-    return passed == 60 ? 0 : 1;
+    passed += test_builtin_wavetable_palette();
+    passed += test_wavetable_mip_crossfade();
+    passed += test_realtime_control_smoothing();
+    passed += test_unison_voice_placement();
+    passed += test_unison_phase_and_width_curves();
+    passed += test_fm_high_guard();
+    passed += test_lfo2_independent_state();
+    passed += test_mod_envelope_state();
+    passed += test_shared_insert_fx();
+    passed += test_insert_fx_block_and_reset();
+    passed += test_insert_fx_performance();
+    std::printf("SUMMARY passed=%u failed=%u total=71\n", passed, 71u - passed);
+    return passed == 71 ? 0 : 1;
 }
