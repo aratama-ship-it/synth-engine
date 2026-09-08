@@ -11,8 +11,8 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--url", default="http://127.0.0.1:8963/shells/web/synth.html?m4r=1")
-parser.add_argument("--out", type=Path, default=Path("design/verify/m4r-custom-wavetable-20260908"))
+parser.add_argument("--url", default="http://127.0.0.1:8963/shells/web/synth.html?m4s=1")
+parser.add_argument("--out", type=Path, default=Path("design/verify/m4s-performance-wt-20260908"))
 parser.add_argument("--design-lint", type=Path)
 args = parser.parse_args()
 args.out.mkdir(parents=True, exist_ok=True)
@@ -52,15 +52,21 @@ with sync_playwright() as p:
     expect(page.locator("#wave-picker-a select")).to_have_value("0")
     expect(page.locator("#wavetable-import-state")).to_have_text("LOAD WAV FIRST")
     page.locator("#wavetable-file").set_input_files({
-        "name": "m4r-test.wav", "mimeType": "audio/wav", "buffer": wavetable_wav()
+        "name": "m4s-test.wav", "mimeType": "audio/wav", "buffer": wavetable_wav()
     })
     expect(page.locator("#wavetable-import-state")).to_contain_text("READY", timeout=10000)
     expect(page.locator("#status")).to_contain_text("出力はミュート中")
+    expect(page.locator("#load-wavetable")).to_have_text("REPLACE WAV")
+    expect(page.locator("#clear-wavetable")).to_be_enabled()
     page.locator("#wave-picker-a select").select_option("4")
     expect(page.locator("#wave-picker-a select")).to_have_value("4")
     page.screenshot(path=str(args.out / "custom-wavetable.png"))
-    page.locator("#wave-picker-a select").select_option("0")
-    passed("Custom WAV import is guarded, acknowledged, session-only, and remains muted")
+    page.locator("#clear-wavetable").click()
+    expect(page.locator("#wavetable-import-state")).to_have_text("NOT LOADED")
+    expect(page.locator("#wave-picker-a select")).to_have_value("0")
+    expect(page.locator("#load-wavetable")).to_have_text("LOAD WAV")
+    expect(page.locator("#clear-wavetable")).to_be_disabled()
+    passed("Custom WAV load, replace state, clear fallback, and muted output are guarded")
 
     def patch():
         return page.evaluate("JSON.parse(localStorage.getItem('synth-engine.studio.autosave.v1'))")
@@ -191,7 +197,7 @@ with sync_playwright() as p:
         lint = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(lint)
         for tab in ["osc", "fx", "matrix", "match"]:
-            target = {"name": f"SynthEngine M4r {tab.upper()}", "url": args.url + f"&tab={tab}", "note": "Custom wavetable UI; fresh context, no listening claim"}
+            target = {"name": f"SynthEngine M4s {tab.upper()}", "url": args.url + f"&tab={tab}", "note": "Performance octave and Custom WT lifecycle UI; fresh context, no listening claim"}
             out = args.out / tab
             results = lint.run_target(browser, target, out, [(390, 844), (1440, 900)])
             lint.write_report(target, results, out)

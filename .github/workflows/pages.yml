@@ -51,6 +51,7 @@ jobs:
             shells/web/envelope-match.js \
             shells/web/filter-match.js \
             shells/web/note-registry.js \
+            shells/web/keyboard-input.js \
             shells/web/wavetable-import.js \
             _site/shells/web/
           cp presets/*.txt _site/presets/

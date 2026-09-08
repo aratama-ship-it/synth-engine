@@ -2,6 +2,14 @@ export const WAVETABLE_SIZE = 2048;
 export const MAX_WAVETABLE_FRAMES = 4;
 export const MAX_WAV_BYTES = 2 * 1024 * 1024;
 
+export function createSafeWavetableFrame() {
+  const frame = new Float32Array(WAVETABLE_SIZE);
+  for (let index = 0; index < WAVETABLE_SIZE; index += 1) {
+    frame[index] = Math.sin(index / WAVETABLE_SIZE * Math.PI * 2) * 0.95;
+  }
+  return frame;
+}
+
 function readFourCC(view, offset) {
   if (offset < 0 || offset + 4 > view.byteLength) throw new Error("WAVヘッダーが途中で切れています");
   return String.fromCharCode(

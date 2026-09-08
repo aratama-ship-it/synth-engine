@@ -83,6 +83,7 @@ test("studio dials support vertical drag, fine control, reset, and direct entry"
 });
 
 test("live output starts behind a safety gate and lost input focus kills held notes", async () => {
+  const html = await readFile(new URL("synth.html", root), "utf8");
   const source = await readFile(new URL("synth-ui.js", root), "utf8");
   assert.match(source, /preparedOutputGate\.gain\.value = 0/);
   assert.match(source, /gain\.linearRampToValueAtTime\(1, at \+ \.025\)/);
@@ -90,7 +91,12 @@ test("live output starts behind a safety gate and lost input focus kills held no
   assert.match(source, /pointerleave/);
   assert.match(source, /window\.addEventListener\("pointerup"[^\n]*true\)/);
   assert.match(source, /event\.key === "Escape"[^\n]*panicAudio\(\{ broadcast:true \}\)/);
-  assert.match(source, /window\.addEventListener\("keyup"[^\n]*true\)/);
+  assert.match(source, /window\.addEventListener\("keyup"[\s\S]*?\}, true\);/);
+  assert.match(html, /Z OCT− \/ X OCT\+/);
+  assert.match(html, /id="keyboard-octave-state"[^>]*aria-live="polite"/);
+  assert.match(source, /octaveDeltaForKeyboardEvent\(event\)/);
+  assert.match(source, /panicAudio\(\);[\s\S]*keyboardOctave = next;[\s\S]*renderPiano\(\)/);
+  assert.match(source, /activeKeyboardTokens\.get\(inputId\)/);
   assert.match(source, /ensureAudio\(\(\) => noteRegistry\.isPending\(ticket\)\)/);
   assert.match(source, /new BroadcastChannel\("synth-engine\.audio-session\.v1"\)/);
   assert.match(source, /postMessage\(\{ type:"claim", owner:audioSessionId \}\)/);
@@ -109,8 +115,13 @@ test("each oscillator exposes four built-ins plus one session-only custom waveta
   assert.match(source, /wavetableFrameSample\(slot, first/);
   assert.match(html, /4 BUILTIN WT \+ 1 SESSION/);
   assert.match(html, /id="load-wavetable"/);
+  assert.match(html, /id="clear-wavetable"[^>]*disabled/);
   assert.match(html, /LOCAL WAV · SESSION ONLY/);
   assert.match(source, /parseWavetableWav/);
+  assert.match(source, /createSafeWavetableFrame\(\)/);
+  assert.match(source, /REPLACE WAV/);
+  assert.match(source, /clearCustomWavetable/);
+  assert.match(source, /CLEARING · OUTPUT MUTED/);
   assert.match(source, /closeOutputGate\(\); node\.reset\(0\)/);
 });
 

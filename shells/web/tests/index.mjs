@@ -7,6 +7,7 @@ import "./node-api.test.mjs";
 import "./studio-presets.test.mjs";
 import "./space-effects.test.mjs";
 import "./note-registry.test.mjs";
+import "./keyboard-input.test.mjs";
 import "./studio-shell.test.mjs";
 import "./mod-matrix.test.mjs";
 import "./fx-rack.test.mjs";

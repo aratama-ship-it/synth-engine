@@ -344,6 +344,9 @@ C++ CLIレンダラー（プリセット＋イベントJSON → WAV）を基準�
 - **2026-09-08 M4r session-only Custom Wavetable WAV import（ローカル検証済み）**。
   内蔵4 wavetableを維持したままslot 4をCustomへ拡張し、WebのOSC A/Bで共有するローカルWAV読込を追加した。入力はPCM 16/24/32-bitまたはfloat 32-bit、mono/stereo、2048 samples × 1〜4 frames、2 MiB以下へ限定する。stereo平均後にフレーム単位でDC除去・peak 0.95正規化し、コア側でも全入力を先に検証してから10段mipを生成するため、無音／NaN／Inf／過大値の失敗では直前のCustom内容を変更しない。読込前はmainとWorkletの両方でvoice停止、event ring clear、出力ゲート閉鎖を行い、読込後も自動発音・自動selector変更・出力再開をしない。Custom音声はセッション限定でlocalStorage／パッチJSON／外部へ保存しない。未読込のCustom選択は直前値へ戻し、Custom参照パッチを新規セッションで復元するとBasic Shapesへフォールバックして通知する。engine version 16、core 72/72、Web 65/65、freestanding PASS。native/WASMは既存Saw fixtureでサンプル単位ビット一致。WASM 75,383 B（gzip 21,094 B）。無音安全ゲートのCustom slot実測は最大peak 0.008754、release後0、panic後0、NaN／Inf 0。ローカルChromiumで2048-sample stereo float WAVを57.0 msで読込後、出力ミュートのままslot 4選択と設定図更新を確認した。1280px／390pxとも横溢れなし、LOAD WAV 44px、console warning/error 0。Python版Playwrightが環境にないため従来の`tools/test-studio-ui.py`とdesign-lint一括実行は未実施。音色の本人試聴、Safari／実機タッチ、AUからのCustom読込UIは未確認。仕様は`SPEC_M4r.md`。
 
+- **2026-09-08 M4s PC keyboard octave＋Custom WT lifecycle（ローカル検証済み）**。
+  PC演奏へ`Z = -1 octave`、`X = +1 octave`を追加し、初期0、範囲-3〜+3、1操作12 semitonesとした。octave変更は全noteをpanic停止して出力gateを閉じてから行い、keydown時の物理key tokenでkeyupを解決するため、変更後noteを誤って解放する残留発音経路を作らない。画面鍵盤も同じoffsetで再描画し、現在のPC音域を文字表示する。Custom WTは読込後にLOADをREPLACEへ変え、CLEAR時は出力を閉じてslot 4を有限な1-frame sineへ置換し、使用中OSCをBasic Shapesへ戻してからセッションデータを破棄する。どちらも自動発音しない。core 72/72、Web 69/69、freestanding、構文、diff check PASS。物理出力へ未接続の実WASMは最大peak 0.008754、release後0、panic後0、clear再読込後0、NaN／Inf 0。隔離ChromiumでLOAD→REPLACE→CLEAR、OSC復帰、5画面幅の横溢れ0、browser error 0を完走。design-lintは390×844 / 1440×900でNG 0／WARN 0／測定不可0、44px未満0件、最悪コントラスト8.10:1。実ブラウザでZ/Xと表示鍵盤の同期、初期状態復帰、console log 0を確認した。音色の本人試聴、Safari／実機タッチは未確認。仕様は`SPEC_M4s.md`。
+
 ## 進め方
 
 思考・設計・検証は Claude、実装は Codex へ委譲（`_claude-rules/codex-delegation.md`）。

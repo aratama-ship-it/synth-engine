@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="SynthEngineのウェーブテーブル・シンセサイザーをブラウザで演奏し編集する画面">
   <title>SynthEngine — Web Synth</title>
-  <link rel="stylesheet" href="./synth-ui.css?m4r=1">
+  <link rel="stylesheet" href="./synth-ui.css?m4s=1">
 </head>
 <body>
   <header class="topbar">
@@ -91,7 +91,10 @@
           <h2 id="wavetable-import-title">LOCAL WAV · SESSION ONLY</h2>
         </div>
         <p>PCM / float WAV · 2048 samples × 1–4 frames · mono / stereo</p>
-        <button id="load-wavetable" class="button button-quiet" type="button">LOAD WAV</button>
+        <div class="wavetable-actions">
+          <button id="load-wavetable" class="button button-quiet" type="button">LOAD WAV</button>
+          <button id="clear-wavetable" class="button button-quiet" type="button" disabled>CLEAR</button>
+        </div>
         <input id="wavetable-file" class="visually-hidden" type="file" accept=".wav,audio/wav,audio/x-wav" tabindex="-1" aria-hidden="true">
         <strong id="wavetable-import-state" aria-live="polite">NOT LOADED</strong>
       </section>
@@ -293,10 +296,10 @@
     </section>
 
     <section class="keyboard-section" aria-labelledby="keyboard-title">
-      <div class="performance-strip"><div><p class="eyebrow">PERFORMANCE</p><h2 id="keyboard-title">MACROS + KEYBOARD</h2></div><div id="performance-macros" class="performance-macros"></div><p>PC: A W S E D F T G Y H U J K　/　最初の操作でAudioを開始</p></div>
+      <div class="performance-strip"><div><p class="eyebrow">PERFORMANCE</p><h2 id="keyboard-title">MACROS + KEYBOARD</h2></div><div id="performance-macros" class="performance-macros"></div><div class="keyboard-guide"><p>PC: Z OCT− / X OCT+ · A W S E D F T G Y H U J K · 初回入力でAudio開始</p><strong id="keyboard-octave-state" aria-live="polite">OCTAVE 0 · C4–C5</strong></div></div>
       <div class="piano-scroll"><div id="piano" class="piano" aria-label="C4からC6までの鍵盤"></div></div>
     </section>
   </main>
-  <script type="module" src="./synth-ui.js?m4r=1"></script>
+  <script type="module" src="./synth-ui.js?m4s=1"></script>
 </body>
 </html>

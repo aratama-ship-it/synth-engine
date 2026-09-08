@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { importSource } from "./load-module.mjs";
 
-const { parseWavetableWav } = await importSource("../wavetable-import.js");
+const { createSafeWavetableFrame, parseWavetableWav } = await importSource("../wavetable-import.js");
 
 function writeFourCC(view, offset, text) {
   for (let index = 0; index < 4; index += 1) view.setUint8(offset + index, text.charCodeAt(index));
@@ -58,4 +58,12 @@ test("custom wavetable parser averages stereo and rejects ambiguous or silent in
   /2048/);
   assert.throws(() => parseWavetableWav(pcm16Wav(2048, 1, () => 0.25)), /無音|一定値/);
   assert.throws(() => parseWavetableWav(new ArrayBuffer(44)), /RIFF\/WAVE/);
+});
+
+test("custom wavetable clear frame is a finite, bounded, single-cycle sine", () => {
+  const frame = createSafeWavetableFrame();
+  assert.equal(frame.length, 2048);
+  assert.equal(frame[0], 0);
+  assert.ok(Math.abs(frame[512] - 0.95) < 1e-6);
+  assert.ok([...frame].every((value) => Number.isFinite(value) && Math.abs(value) <= 0.950001));
 });

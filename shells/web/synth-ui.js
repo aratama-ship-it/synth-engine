@@ -8,7 +8,8 @@ import { MATCH_TARGET_RMS_DBFS, candidateRenderPlan, compareSoundAnalyses, level
 import { suggestAmpEnvelope } from "./envelope-match.js";
 import { estimateFilterCutoff, planFilterCutoffProbe } from "./filter-match.js";
 import { createNoteRegistry } from "./note-registry.js";
-import { parseWavetableWav } from "./wavetable-import.js";
+import { createSafeWavetableFrame, parseWavetableWav } from "./wavetable-import.js?m4s=1";
+import { clampKeyboardOctave, keyboardInputId, keyboardOctaveLabel, noteForKeyboardEvent, octaveDeltaForKeyboardEvent } from "./keyboard-input.js?m4s=1";
 
 const paths = { wasm: "../../build/synth_engine.wasm?m4r=1", presets: "../../presets/" };
 const presets = Object.freeze({
@@ -46,8 +47,6 @@ const insertFxParamIds = new Set([
   ...FX_IDS.flatMap((id) => Object.values(FX_CORE_PARAM_IDS[id])),
   ...FX_CORE_PARAM_IDS.order,
 ]);
-const keyboardMap = Object.freeze({ KeyA:60, KeyW:61, KeyS:62, KeyE:63, KeyD:64, KeyF:65, KeyT:66, KeyG:67, KeyY:68, KeyH:69, KeyU:70, KeyJ:71, KeyK:72 });
-const keyboardKeyMap = Object.freeze({ a:60, w:61, s:62, e:63, d:64, f:65, t:66, g:67, y:68, h:69, u:70, j:71, k:72 });
 const elements = Object.fromEntries([...document.querySelectorAll("[id]")].map((element) => [element.id, element]));
 const urlParams = new URLSearchParams(window.location.search);
 elements["quality-lab"].hidden = urlParams.get("quality") !== "1";
@@ -56,6 +55,7 @@ const values = new Map();
 const controlsById = new Map();
 const noteRegistry = createNoteRegistry();
 const pointerNoteTokens = new Map();
+const activeKeyboardTokens = new Map();
 const audioSessionId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 const audioSessionChannel = typeof BroadcastChannel === "function" ? new BroadcastChannel("synth-engine.audio-session.v1") : undefined;
 let wasmBytes;
@@ -65,6 +65,7 @@ let audioReady;
 let outputGate;
 let spaceEffects;
 const customWavetable = { frames:null, frameCount:0, sampleRate:0, name:"" };
+let customWavetableBusy = false;
 const spaceValues = { ...SPACE_DEFAULTS };
 const fxValues = structuredClone(FX_DEFAULTS);
 const storageKeys = Object.freeze({ autosave:"synth-engine.studio.autosave.v1", patches:"synth-engine.studio.user-patches.v1" });
@@ -75,6 +76,7 @@ let applyingPatch = false;
 let activePatchIdentity = { name:"EPiano", category:"Keys" };
 let saveReplacePending = false;
 let saveReturnFocus;
+let keyboardOctave = 0;
 const tabOrder = ["osc", "fx", "matrix", "match"];
 const matrixParamIds = new Set(Array.from({ length:6 }, (_, index) => Object.values(modulationSlotIds(index))).flat());
 let selectedModSource = 1;
@@ -1171,6 +1173,7 @@ function stopAllNotes() {
     catch { /* The reset below is the authoritative recovery path. */ }
   }
   pointerNoteTokens.clear();
+  activeKeyboardTokens.clear();
   return active.length;
 }
 function panicAudio({ broadcast = false } = {}) {
@@ -1179,16 +1182,53 @@ function panicAudio({ broadcast = false } = {}) {
   finally { closeOutputGate(); }
   if (broadcast) audioSessionChannel?.postMessage({ type:"panic", owner:audioSessionId });
 }
+function syncWavetableActions() {
+  elements["load-wavetable"].textContent = customWavetable.frames ? "REPLACE WAV" : "LOAD WAV";
+  elements["load-wavetable"].disabled = customWavetableBusy;
+  elements["clear-wavetable"].disabled = customWavetableBusy || !customWavetable.frames;
+}
+async function clearCustomWavetable() {
+  if (customWavetableBusy || !customWavetable.frames) return;
+  customWavetableBusy = true;
+  syncWavetableActions();
+  elements["wavetable-import-state"].textContent = "CLEARING · OUTPUT MUTED";
+  panicAudio();
+  try {
+    const node = await ensureAudio(() => false);
+    closeOutputGate(); node.reset(0);
+    await node.loadWavetable(CUSTOM_WAVETABLE_SLOT, createSafeWavetableFrame());
+    for (const id of [0, 17]) if (Math.round(values.get(id)) === CUSTOM_WAVETABLE_SLOT) setValue(id, 0);
+    customWavetable.frames = null;
+    customWavetable.frameCount = 0;
+    customWavetable.sampleRate = 0;
+    customWavetable.name = "";
+    visualFrameGain.clear();
+    renderWaveform("wave-a", 0, 1); renderWaveform("wave-b", 17, 18);
+    elements["wavetable-import-state"].textContent = "NOT LOADED";
+    elements["wavetable-import-state"].removeAttribute("title");
+    setStatus("CUSTOM WTを消去し、使用中のOSCをBasic Shapesへ戻しました。出力はミュート中です。");
+  } catch (error) {
+    elements["wavetable-import-state"].textContent = "READY · PREVIOUS KEPT";
+    setStatus(`CUSTOM WTを消去できません: ${error.message}。直前の波形を保持しました。`, true);
+  } finally {
+    customWavetableBusy = false;
+    syncWavetableActions();
+  }
+}
 function installWavetableImport() {
   const input = elements["wavetable-file"];
-  elements["load-wavetable"].addEventListener("click", () => input.click());
+  syncWavetableActions();
+  elements["load-wavetable"].addEventListener("click", () => { if (!customWavetableBusy) input.click(); });
+  elements["clear-wavetable"].addEventListener("click", clearCustomWavetable);
   input.addEventListener("change", async () => {
     const file = input.files?.[0];
-    if (!file) return;
+    if (!file || customWavetableBusy) return;
+    customWavetableBusy = true;
+    syncWavetableActions();
     try {
       const parsed = parseWavetableWav(await file.arrayBuffer());
       elements["wavetable-import-state"].textContent = "LOADING · OUTPUT MUTED";
-      stopAllNotes(); closeOutputGate();
+      panicAudio();
       const node = await ensureAudio(() => false);
       closeOutputGate(); node.reset(0);
       const loaded = await node.loadWavetable(CUSTOM_WAVETABLE_SLOT, parsed.frames);
@@ -1200,12 +1240,17 @@ function installWavetableImport() {
       renderWaveform("wave-a", 0, 1); renderWaveform("wave-b", 17, 18);
       elements["wavetable-import-state"].textContent =
         `READY · ${parsed.frameCount}F · ${parsed.sampleRate.toLocaleString()} Hz`;
+      elements["wavetable-import-state"].title = file.name;
       setStatus(`${file.name}をCUSTOM WTへ読み込みました（${parsed.frameCount}フレーム、${loaded.loadMs.toFixed(1)} ms）。出力はミュート中です。WAVEでCustom · Sessionを選び、鍵盤を押すと再開します。`);
     } catch (error) {
       elements["wavetable-import-state"].textContent = customWavetable.frames
-        ? `READY · PREVIOUS KEPT` : "ERROR · NOT LOADED";
+        ? "READY · PREVIOUS KEPT" : "ERROR · NOT LOADED";
       setStatus(`CUSTOM WTを読み込めません: ${error.message}。${customWavetable.frames ? "直前の波形を保持しました。" : "既定波形を保持しました。"}`, true);
-    } finally { input.value = ""; }
+    } finally {
+      customWavetableBusy = false;
+      input.value = "";
+      syncWavetableActions();
+    }
   });
 }
 function installAudioSession() {
@@ -1221,7 +1266,42 @@ function finishPointerNote(pointerId) {
   pointerNoteTokens.delete(pointerId);
   stopNote(token);
 }
-function renderPiano() { const black = new Set([1,3,6,8,10]); const whiteNotes = []; for (let note = 60; note <= 84; note += 1) if (!black.has(note % 12)) whiteNotes.push(note); whiteNotes.forEach((note) => { const key = document.createElement("button"); key.type="button"; key.className="piano-key white"; key.dataset.note=String(note); key.innerHTML=`<span>${note % 12 === 0 ? `C${Math.floor(note / 12) - 1}` : ""}</span>`; bindKey(key, note); elements.piano.append(key); }); for (let note = 60; note <= 83; note += 1) { if (!black.has(note % 12)) continue; const whiteBefore = whiteNotes.filter((white) => white < note).length; const key = document.createElement("button"); key.type="button"; key.className="piano-key black"; key.style.left=`calc(${whiteBefore} / 15 * 100% - (100% / 15 * .36))`; key.dataset.note=String(note); key.innerHTML="<span></span>"; bindKey(key, note); elements.piano.append(key); } }
+function renderPiano() {
+  const black = new Set([1,3,6,8,10]);
+  const firstNote = 60 + keyboardOctave * 12;
+  const lastNote = 84 + keyboardOctave * 12;
+  const whiteNotes = [];
+  elements.piano.replaceChildren();
+  elements.piano.setAttribute("aria-label", `${midiNoteName(firstNote)}から${midiNoteName(lastNote)}までの鍵盤`);
+  elements["keyboard-octave-state"].textContent = keyboardOctaveLabel(keyboardOctave);
+  for (let note = firstNote; note <= lastNote; note += 1) if (!black.has(note % 12)) whiteNotes.push(note);
+  whiteNotes.forEach((note) => {
+    const key = document.createElement("button");
+    key.type="button"; key.className="piano-key white"; key.dataset.note=String(note);
+    key.innerHTML=`<span>${note % 12 === 0 ? `C${Math.floor(note / 12) - 1}` : ""}</span>`;
+    bindKey(key, note); elements.piano.append(key);
+  });
+  for (let note = firstNote; note < lastNote; note += 1) {
+    if (!black.has(note % 12)) continue;
+    const whiteBefore = whiteNotes.filter((white) => white < note).length;
+    const key = document.createElement("button");
+    key.type="button"; key.className="piano-key black";
+    key.style.left=`calc(${whiteBefore} / 15 * 100% - (100% / 15 * .36))`;
+    key.dataset.note=String(note); key.innerHTML="<span></span>"; bindKey(key, note); elements.piano.append(key);
+  }
+}
+
+function shiftKeyboardOctave(delta) {
+  const next = clampKeyboardOctave(keyboardOctave + delta);
+  if (next === keyboardOctave) {
+    setStatus(`${keyboardOctaveLabel(keyboardOctave)}が演奏可能範囲の端です。`);
+    return;
+  }
+  panicAudio();
+  keyboardOctave = next;
+  renderPiano();
+  setStatus(`${keyboardOctaveLabel(keyboardOctave)}へ移動しました。次のキー入力で安全に発音を再開します。`);
+}
 function bindKey(element, note) {
   element.setAttribute("aria-label", `${midiNoteName(note)}を演奏`);
   element.addEventListener("keydown", (event) => {
@@ -1246,8 +1326,27 @@ function bindKey(element, note) {
   element.addEventListener("pointerleave", (event) => { if (!element.hasPointerCapture?.(event.pointerId)) finish(event); });
 }
 function installKeyboard() {
-  window.addEventListener("keydown", (event) => { if (event.key === "Escape") { panicAudio({ broadcast:true }); return; } if (event.repeat || elements["mod-dialog"].open || !elements["patch-save-overlay"].hidden || event.target.matches('input:not([type="range"]),select,textarea')) return; const note = keyboardMap[event.code] ?? keyboardKeyMap[event.key?.toLowerCase()]; if (note === undefined) return; event.preventDefault(); startNote(note, `keyboard-${note}`, elements.piano.querySelector(`[data-note="${note}"]`)); }, true);
-  window.addEventListener("keyup", (event) => { const note = keyboardMap[event.code] ?? keyboardKeyMap[event.key?.toLowerCase()]; if (note !== undefined) stopNote(`keyboard-${note}`); }, true);
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { panicAudio({ broadcast:true }); return; }
+    if (event.repeat || elements["mod-dialog"].open || !elements["patch-save-overlay"].hidden || event.target.matches('input:not([type="range"]),select,textarea')) return;
+    const octaveDelta = octaveDeltaForKeyboardEvent(event);
+    if (octaveDelta) { event.preventDefault(); shiftKeyboardOctave(octaveDelta); return; }
+    const note = noteForKeyboardEvent(event, keyboardOctave);
+    const inputId = keyboardInputId(event);
+    if (note === undefined || inputId === undefined || activeKeyboardTokens.has(inputId)) return;
+    event.preventDefault();
+    const token = `keyboard-${inputId}`;
+    activeKeyboardTokens.set(inputId, token);
+    startNote(note, token, elements.piano.querySelector(`[data-note="${note}"]`));
+  }, true);
+  window.addEventListener("keyup", (event) => {
+    const inputId = keyboardInputId(event);
+    if (inputId === undefined) return;
+    const token = activeKeyboardTokens.get(inputId);
+    if (!token) return;
+    activeKeyboardTokens.delete(inputId);
+    stopNote(token);
+  }, true);
   window.addEventListener("pointerup", (event) => finishPointerNote(event.pointerId), true);
   window.addEventListener("pointercancel", (event) => finishPointerNote(event.pointerId), true);
   window.addEventListener("mouseup", () => { for (const pointerId of [...pointerNoteTokens.keys()]) finishPointerNote(pointerId); }, true);

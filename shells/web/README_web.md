@@ -30,7 +30,9 @@ Chromium 系ブラウザで次を開く。
 - `MATRIX`: コアと同じ12 source選択（None + 11信号）、14 destination選択（None + 13送り先）、6 slot。SOURCEを選んでOSC面の`+ MOD`を押す方法と、行を直接編集する方法は同じパラメータ55〜72へ接続される。Macro 1〜4と独立Mod EGをsourceにできる。
 - `MATCH`: 参照音をブラウザ内だけで復号し、長さ、ピーク、全体／active RMS、10–90%の立ち上がり、単音ピッチと信頼度、微分ベースの明るさ指標、ステレオ幅、20 ms RMS包絡を測る。包絡からAMP Attack / Decay / Sustain / Releaseの根拠付き仮説を表示し、`APPLY DETECTED`を押したときだけ検出値を適用する。note-offを自然減衰から分離できない場合はReleaseを`KEEP CURRENT`とする。FilterがONかつLP12 / LP24なら、BrightnessをCutoff値と読み替えず、現在値から必要方向へ×2または×0.5した分析専用probeを1回だけ描画して局所応答を測り、Cutoffだけの候補を表示する。`APPLY CUTOFF`を押すまでパッチは変更せず、Filter ON / Mode / Resonance / EGは保持する。pitch confidence 70%以上なら、Insert用ID 90〜112を除くcore dry値を最寄りMIDI noteと参照の発音区間で最大12秒オフライン描画できる。参照と候補はactive RMS −18 dBFS、peak ceiling −1 dBFSで別々に補正し、`A REFERENCE / B CURRENT / STOP`で比較する。候補は`CORE DRY`で、Insert / Delay / Reverbを含まない。ドライな単音0.5〜4秒を推奨する。
 
-PCキー`A W S E D F T G Y H U J K`または画面鍵盤の最初の操作でAudioContextを開始し、その操作自体も発音になる。ダイヤルは上下ドラッグ、Shift併用の微調整、ダブルクリックの初期値復帰、単位付き数値入力、rangeのキー操作に対応する。文字入力欄とselectへ入力中だけPC鍵盤演奏を抑止する。
+PCキー`A W S E D F T G Y H U J K`または画面鍵盤の最初の操作でAudioContextを開始し、その操作自体も発音になる。`Z`で1 octave下、`X`で1 octave上へ移動し、範囲は-3〜+3 octave。移動前に押下中の全noteを解放し、画面鍵盤と現在音域表示を一緒に更新する。ダイヤルは上下ドラッグ、Shift併用の微調整、ダブルクリックの初期値復帰、単位付き数値入力、rangeのキー操作に対応する。文字入力欄とselectへ入力中だけPC鍵盤演奏を抑止する。
+
+Custom WTは未読込時の`LOAD WAV`が読込後に`REPLACE WAV`へ変わり、`CLEAR`でセッション波形を消去できる。CLEARは出力を閉じ、Custom slotを安全な1-frame sineへ置換してから、Customを使っているOSC A/BをBasic Shapesへ戻す。読込・置換・消去後はいずれも自動発音しない。
 
 共有Insertはコア内部でwet/bypassを平滑化する。AudioContext停止中はDelay入力、Reverb mixなどWeb側AudioParamを予約補間せず即時値で初期化する。出力は0から25 msで開く安全ゲートを通し、初回の過大出力を防ぐ。画面鍵盤はpointer IDごとに発音を管理し、`pointerup` / `pointercancel` / `lostpointercapture`で解除する。ウインドウのblur、pagehide、非表示化では待機中と発音中のノートを消去し、コアをvoice resetして出力ゲートを閉じる。次の演奏入力で同じAudioContextを再開できる。
 
@@ -40,7 +42,7 @@ FXは`OSC / FILTER / AMP → MASTER → 共有C++ INSERTS → DRY + Web DELAY + 
 
 MATCHの候補描画後にcoreパラメータ、preset、INIT、Undo / Redo、JSON importでcore値が変わると、前の候補を比較不能にして再描画を求める。AMP ENV仮説とFilter Cutoff仮説の適用も同じ扱いで、変更は既存Undoから一手で戻せる。A/B下の包絡相関、pitch cents差、attack差、brightness差は次に触る場所を絞る補助値であり、音色の一致や完成判定ではない。仕様境界は`SPEC_M4c.md`、`SPEC_M4d.md`、`SPEC_M4e.md`。
 
-Studio UIの保存・操作面とDelay / ReverbはWeb殻に置き、共有InsertはM4nからコア／AUにも公開する。M4aではコアの内蔵4 wavetableを各4フレームへ拡張し、C ABIとパラメータ数を維持したままengine versionを9へ更新した。M4fではmip境界をalias-safeな100 cent crossfadeへ変更し、同じ境界を通るWeb / nativeコアをengine version 10へ更新した。M4gではMorph／FM／Level系8操作の5 ms平滑化と、unisonのdetune／pan配置分離をコアへ追加しengine versionを11へ更新した。M4hではBalanced位相、Natural Widthカーブ、高域FM Guardを比較用の3パラメータとして追加し、engine versionを12へ更新した。M4iでは日常のOSC操作を先頭へ戻し、`QUALITY LAB`は通常画面から外して`?quality=1`の明示的な検証URLだけに残した。M4jではAudioContext再開直後のWeb FX初期値と入力解放を安全化し、M4kではReverb IRの過大ゲインと自動復元時のプリセット表示ずれを修正した。M4lではMatrix専用の独立LFO 2を追加し、既存IDを維持したまま83パラメータ・engine version 13へ更新した。M4mではMacro 3 / 4と独立Mod EGを追加して90パラメータ・engine version 14へ、M4nでは4 Insertと順序を共通コアへ移して113パラメータ・engine version 15へ更新した。M4rではslot 4をセッション用Customへ拡張し、厳密なローカルWAV読込と非破壊検証を追加してengine version 16へ更新した。比較時は従来どおりユニゾンとFMを独立操作でき、Studio全体の44px操作面積とコンパクト密度も維持する。設計メモと数値トークンは`design/SYNTH_UI_DESIGN.md`、`design/SYNTH_UI_TOKEN_SHEET.md`に置く。2026-09-07の比較音と検証台帳は`design/overnight-runs/2026-09-07-serum-until-08/`に置く。
+Studio UIの保存・操作面とDelay / ReverbはWeb殻に置き、共有InsertはM4nからコア／AUにも公開する。M4aではコアの内蔵4 wavetableを各4フレームへ拡張し、C ABIとパラメータ数を維持したままengine versionを9へ更新した。M4fではmip境界をalias-safeな100 cent crossfadeへ変更し、同じ境界を通るWeb / nativeコアをengine version 10へ更新した。M4gではMorph／FM／Level系8操作の5 ms平滑化と、unisonのdetune／pan配置分離をコアへ追加しengine versionを11へ更新した。M4hではBalanced位相、Natural Widthカーブ、高域FM Guardを比較用の3パラメータとして追加し、engine versionを12へ更新した。M4iでは日常のOSC操作を先頭へ戻し、`QUALITY LAB`は通常画面から外して`?quality=1`の明示的な検証URLだけに残した。M4jではAudioContext再開直後のWeb FX初期値と入力解放を安全化し、M4kではReverb IRの過大ゲインと自動復元時のプリセット表示ずれを修正した。M4lではMatrix専用の独立LFO 2を追加し、既存IDを維持したまま83パラメータ・engine version 13へ更新した。M4mではMacro 3 / 4と独立Mod EGを追加して90パラメータ・engine version 14へ、M4nでは4 Insertと順序を共通コアへ移して113パラメータ・engine version 15へ更新した。M4rではslot 4をセッション用Customへ拡張し、厳密なローカルWAV読込と非破壊検証を追加してengine version 16へ更新した。M4sではZ/X octave移動とCustom WTのREPLACE/CLEARをWeb UIへ追加し、コアとengine versionは変更していない。比較時は従来どおりユニゾンとFMを独立操作でき、Studio全体の44px操作面積とコンパクト密度も維持する。設計メモと数値トークンは`design/SYNTH_UI_DESIGN.md`、`design/SYNTH_UI_TOKEN_SHEET.md`に置く。2026-09-07の比較音と検証台帳は`design/overnight-runs/2026-09-07-serum-until-08/`に置く。
 
 ## 確認手順
 
@@ -82,9 +84,9 @@ Worklet内部カウンタへフォールバックする。
 node --test shells/web/tests/
 ```
 
-発音・DSP・Web Audioに触れる変更では、先に現在のWASMをビルドしてから65件のWebテストを実行する。
+発音・DSP・Web Audioに触れる変更では、先に現在のWASMをビルドしてから69件のWebテストを実行する。
 `audio-safety.test.mjs`はAudioWorkletProcessorへ実WASMを読み込み、出力をAudioContextや物理デバイスへ接続せず、
-48 kHz／128 framesでCustom WT読込、初回発音、Morph変更中の発音継続、note-off後の無音、voice resetによるpanic後の無音、
+48 kHz／128 framesでCustom WT読込、初回発音、Morph変更中の発音継続、note-off後の無音、voice resetによるpanic後の無音、CLEAR用安全波形の無発音再読込、
 全サンプルの有限性と低出力プリセット時のpeak上限0.25を検査する。WASMが無いローカル実行ではこの1件をskipするが、
 GitHub Actionsは`make wasm`の成功後に同じテストを実行するためskipしない。
 

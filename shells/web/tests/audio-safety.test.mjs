@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { importSource } from "./load-module.mjs";
 
 const { SynthEngineProcessor } = await importSource("../synth-worklet.js");
+const { createSafeWavetableFrame } = await importSource("../wavetable-import.js");
 
 const SAMPLE_RATE = 48_000;
 const BLOCK_SIZE = 128;
@@ -66,10 +67,7 @@ test("silent safety gate: parameter change, note release, and panic remain bound
     processor.port.postMessage = (message) => messages.push(message);
     await waitUntilReady(processor, messages);
 
-    const customFrame = new Float32Array(2048);
-    for (let index = 0; index < customFrame.length; index += 1) {
-      customFrame[index] = Math.sin(index / customFrame.length * Math.PI * 2) * 0.95;
-    }
+    const customFrame = createSafeWavetableFrame();
     processor.receive({
       type: "wavetable", requestId: 1, slot: 4, frameCount: 1, frames: customFrame,
     });
@@ -144,6 +142,23 @@ test("silent safety gate: parameter change, note release, and panic remain bound
     assert.equal(nonFinite, 0, "panic path produced NaN or Infinity");
     assert.ok(peakAfterPanic <= SILENCE_CEILING, `panic left residual output: ${peakAfterPanic}`);
 
+    processor.receive({
+      type: "wavetable", requestId: 2, slot: 4, frameCount: 1,
+      frames: createSafeWavetableFrame(),
+    });
+    const cleared = messages.find((message) =>
+      message.type === "wavetableLoaded" && message.requestId === 2);
+    assert.equal(cleared?.result, 0, cleared?.message || "safe clear frame did not acknowledge");
+    let peakAfterClearLoad = 0;
+    for (let block = 0; block < 8; block += 1) {
+      const rendered = renderBlock(processor);
+      peakAfterClearLoad = Math.max(peakAfterClearLoad, rendered.peak);
+      nonFinite += rendered.nonFinite;
+    }
+    assert.equal(nonFinite, 0, "custom clear path produced NaN or Infinity");
+    assert.ok(peakAfterClearLoad <= SILENCE_CEILING,
+      `custom clear load produced output without a note: ${peakAfterClearLoad}`);
+
     context.diagnostic(JSON.stringify({
       physicalOutput: "disconnected",
       customWavetable: "loaded in slot 4",
@@ -153,6 +168,7 @@ test("silent safety gate: parameter change, note release, and panic remain bound
       peakAfterRelease,
       peakBeforePanic,
       peakAfterPanic,
+      peakAfterClearLoad,
       nonFinite,
     }));
   } finally {
