@@ -890,7 +890,7 @@ static bool test_parameter_sweep() {
         }
     }
     const bool ok = renders == synth::kParamCount * 3u && nonFinite == 0 &&
-                    peak <= 8.0 && synth_engine_version() == 16;
+                    peak <= 8.0 && synth_engine_version() == 17;
     std::printf("%s 19 parameter sweep: renders=%u nan_inf=%llu peak=%.9f limit=8.000000 version=%u\n",
                 ok ? "PASS" : "FAIL", renders,
                 static_cast<unsigned long long>(nonFinite), peak, synth_engine_version());
@@ -2679,7 +2679,7 @@ static bool test_builtin_wavetable_palette() {
             largestPeakError, std::fabs(lastPeak / firstPeak - 1.0));
     }
     const bool ok = selectorsDiscrete && framesValid && finite && smallestDifferenceRms >= 0.25 &&
-                    largestPeakError <= 1.0e-5 && synth_engine_version() == 16;
+                    largestPeakError <= 1.0e-5 && synth_engine_version() == 17;
     std::printf("%s 61 builtin wavetable palette: slots=4 frames=4 selectors=integer min_endpoint_diff_rms=%.6f max_peak_error=%.9f version=%u\n",
                 ok ? "PASS" : "FAIL", smallestDifferenceRms, largestPeakError,
                 synth_engine_version());
@@ -2946,8 +2946,7 @@ static bool test_unison_phase_and_width_curves() {
     return ok;
 }
 
-static double fm_fold_ratio_db(float midi, float quality) {
-    constexpr uint32_t sampleRate = 48000;
+static double fm_fold_ratio_db(uint32_t sampleRate, float midi, float quality) {
     constexpr uint32_t fftSize = 4096;
     const double frequency = 440.0 * std::exp2((static_cast<double>(midi) - 69.0) / 12.0);
     std::vector<Parameters> params = fm_analysis_params(1.0f);
@@ -2982,6 +2981,18 @@ static bool test_fm_high_guard() {
     const float highDepth = synth::fm_high_guard_depth(
         1.0f, highFrequency, highFrequency, sampleRate);
 
+    bool monotonic = true;
+    float previous = 1.0f;
+    for (uint32_t midi = 0; midi <= 127u; ++midi) {
+        const double frequency = 440.0 * std::exp2(
+            (static_cast<double>(midi) - 69.0) / 12.0);
+        const float depth = synth::fm_high_guard_depth(
+            1.0f, frequency, frequency, sampleRate);
+        monotonic = monotonic && std::isfinite(depth) && depth >= 0.0f && depth <= 1.0f &&
+            depth <= previous;
+        previous = depth;
+    }
+
     std::vector<Parameters> legacy = fm_analysis_params(1.0f);
     std::vector<Parameters> guarded = legacy;
     guarded.push_back({78, 1.0f});
@@ -2990,14 +3001,93 @@ static bool test_fm_high_guard() {
     const StereoRender lowGuarded = render_stereo(48000, 128, 8192, lowEvents, guarded, 227u);
     const size_t lowMismatch = bit_mismatches(lowLegacy.left, lowGuarded.left) +
                                bit_mismatches(lowLegacy.right, lowGuarded.right);
-    const double legacyFold = fm_fold_ratio_db(108.0f, 0.0f);
-    const double guardedFold = fm_fold_ratio_db(108.0f, 1.0f);
-    const bool ok = lowDepth == 1.0f && highDepth > 0.0f && highDepth < 1.0f &&
+    const double legacyFold = fm_fold_ratio_db(48000, 108.0f, 0.0f);
+    const double guardedFold = fm_fold_ratio_db(48000, 108.0f, 1.0f);
+    const bool ok = lowDepth == 1.0f && highDepth >= 0.37f && highDepth <= 0.38f && monotonic &&
                     lowMismatch == 0 && std::isfinite(legacyFold) &&
-                    std::isfinite(guardedFold) && guardedFold <= legacyFold - 6.0;
-    std::printf("%s 66 FM high guard: depth_C5=%.6f depth_C8=%.6f low_bit_mismatches=%zu fold_db=%.6f->%.6f improvement_db=%.6f\n",
-                ok ? "PASS" : "FAIL", lowDepth, highDepth, lowMismatch,
+                    std::isfinite(guardedFold) && guardedFold <= legacyFold - 15.0;
+    std::printf("%s 66 FM high guard: depth_C5=%.6f depth_C8=%.6f monotonic=%d low_bit_mismatches=%zu fold_db=%.6f->%.6f improvement_db=%.6f\n",
+                ok ? "PASS" : "FAIL", lowDepth, highDepth, monotonic ? 1 : 0, lowMismatch,
                 legacyFold, guardedFold, legacyFold - guardedFold);
+    return ok;
+}
+
+static bool samples_are_finite(const std::vector<float>& samples) {
+    if (samples.empty()) return false;
+    for (float sample : samples)
+        if (!std::isfinite(sample)) return false;
+    return true;
+}
+
+static double oscillator_alias_ratio_db(uint32_t sampleRate, uint32_t wavetable) {
+    constexpr uint32_t fftSize = 4096;
+    constexpr float midi = 108.0f;
+    const double frequency = 440.0 * std::exp2((static_cast<double>(midi) - 69.0) / 12.0);
+    std::vector<Parameters> params = clean_analysis_params();
+    params.insert(params.end(), {{0, static_cast<float>(wavetable)}, {1, 0.5f}, {2, 1.0f}});
+    const std::vector<float> output = render(sampleRate, 128, sampleRate,
+        {{0, SYNTH_EV_NOTE_ON, 504, midi, 1.0f}}, params);
+    if (!samples_are_finite(output)) return std::numeric_limits<double>::quiet_NaN();
+    const std::vector<double> power = spectrum_power(output, sampleRate / 2, fftSize, true);
+    const double fundamentalBin = frequency * fftSize / sampleRate;
+    double expectedPower = 0.0;
+    double aliasPower = 0.0;
+    for (uint32_t bin = 1; bin < power.size(); ++bin) {
+        bool expected = bin <= 8;
+        for (uint32_t harmonic = 1;
+             static_cast<double>(harmonic) * fundamentalBin < power.size(); ++harmonic) {
+            if (std::fabs(static_cast<double>(bin) - harmonic * fundamentalBin) <= 8.0) {
+                expected = true;
+                break;
+            }
+        }
+        if (expected) expectedPower += power[bin];
+        else aliasPower += power[bin];
+    }
+    return 10.0 * std::log10(aliasPower / expectedPower);
+}
+
+static bool test_high_range_sample_rates() {
+    static constexpr uint32_t rates[] = {44100, 48000, 96000};
+    constexpr float highMidi = 108.0f;
+    constexpr float lowMidi = 72.0f;
+    const double highFrequency = 440.0 * std::exp2((highMidi - 69.0) / 12.0);
+    bool ok = true;
+    for (uint32_t sampleRate : rates) {
+        double worstOscillatorAlias = -std::numeric_limits<double>::infinity();
+        for (uint32_t wavetable = 0; wavetable < 4u; ++wavetable) {
+            const double alias = oscillator_alias_ratio_db(sampleRate, wavetable);
+            worstOscillatorAlias = std::max(worstOscillatorAlias, alias);
+            ok = ok && std::isfinite(alias) && alias <= -60.0;
+        }
+
+        const float highDepth = synth::fm_high_guard_depth(
+            1.0f, highFrequency, highFrequency, static_cast<double>(sampleRate));
+        std::vector<Parameters> legacy = fm_analysis_params(1.0f);
+        std::vector<Parameters> guarded = legacy;
+        guarded.push_back({78, 1.0f});
+        const std::vector<TimedEvent> lowEvents = {
+            {0, SYNTH_EV_NOTE_ON, 505, lowMidi, 1.0f}
+        };
+        const StereoRender lowLegacy = render_stereo(
+            sampleRate, 128, 8192, lowEvents, legacy, 229u);
+        const StereoRender lowGuarded = render_stereo(
+            sampleRate, 128, 8192, lowEvents, guarded, 229u);
+        const size_t lowMismatch = bit_mismatches(lowLegacy.left, lowGuarded.left) +
+                                   bit_mismatches(lowLegacy.right, lowGuarded.right);
+        const double legacyFold = fm_fold_ratio_db(sampleRate, highMidi, 0.0f);
+        const double guardedFold = fm_fold_ratio_db(sampleRate, highMidi, 1.0f);
+        const double improvement = legacyFold - guardedFold;
+        const bool lowerRate = sampleRate <= 48000u;
+        const bool rateOk = highDepth >= 0.0f && highDepth <= 1.0f && lowMismatch == 0 &&
+            std::isfinite(legacyFold) && std::isfinite(guardedFold) &&
+            guardedFold <= legacyFold + 0.25 && (!lowerRate || improvement >= 15.0);
+        ok = ok && rateOk;
+        std::printf("%s 73 high-range rate=%u: C8_wavetable_mid_alias_worst_db=%.6f threshold_db=-60.000000 C8_HQ_depth=%.6f C5_bit_mismatches=%zu C8_FM_fold_db=%.6f->%.6f improvement_db=%.6f lower_rate_minimum_db=%s\n",
+                    rateOk && worstOscillatorAlias <= -60.0 ? "PASS" : "FAIL", sampleRate,
+                    worstOscillatorAlias, highDepth, lowMismatch, legacyFold, guardedFold,
+                    improvement, lowerRate ? "15.000000" : "n/a");
+    }
     return ok;
 }
 
@@ -3229,12 +3319,13 @@ int main() {
     passed += test_unison_voice_placement();
     passed += test_unison_phase_and_width_curves();
     passed += test_fm_high_guard();
+    passed += test_high_range_sample_rates();
     passed += test_lfo2_independent_state();
     passed += test_mod_envelope_state();
     passed += test_shared_insert_fx();
     passed += test_insert_fx_block_and_reset();
     passed += test_insert_fx_performance();
     passed += test_custom_wavetable_loading();
-    std::printf("SUMMARY passed=%u failed=%u total=72\n", passed, 72u - passed);
-    return passed == 72 ? 0 : 1;
+    std::printf("SUMMARY passed=%u failed=%u total=73\n", passed, 73u - passed);
+    return passed == 73 ? 0 : 1;
 }

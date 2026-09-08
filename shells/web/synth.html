@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="SynthEngineのウェーブテーブル・シンセサイザーをブラウザで演奏し編集する画面">
   <title>SynthEngine — Web Synth</title>
-  <link rel="stylesheet" href="./synth-ui.css?m4s=1">
+  <link rel="stylesheet" href="./synth-ui.css?m4t=1">
 </head>
 <body>
   <header class="topbar">
@@ -97,6 +97,11 @@
         </div>
         <input id="wavetable-file" class="visually-hidden" type="file" accept=".wav,audio/wav,audio/x-wav" tabindex="-1" aria-hidden="true">
         <strong id="wavetable-import-state" aria-live="polite">NOT LOADED</strong>
+        <div id="wavetable-frame-positions" class="wavetable-frame-positions" aria-label="Custom WTの現在フレーム位置" hidden>
+          <span class="wavetable-frame-title">FRAME POSITION</span>
+          <div id="wavetable-frame-position-a"></div>
+          <div id="wavetable-frame-position-b"></div>
+        </div>
       </section>
       <div class="oscillator-pair">
         <section class="module module-osc oscillator-card" aria-labelledby="osc-a-title">
@@ -300,6 +305,6 @@
       <div class="piano-scroll"><div id="piano" class="piano" aria-label="C4からC6までの鍵盤"></div></div>
     </section>
   </main>
-  <script type="module" src="./synth-ui.js?m4s=1"></script>
+  <script type="module" src="./synth-ui.js?m4t=1"></script>
 </body>
 </html>

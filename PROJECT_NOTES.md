@@ -347,6 +347,24 @@ C++ CLIレンダラー（プリセット＋イベントJSON → WAV）を基準�
 - **2026-09-08 M4s PC keyboard octave＋Custom WT lifecycle（ローカル検証済み）**。
   PC演奏へ`Z = -1 octave`、`X = +1 octave`を追加し、初期0、範囲-3〜+3、1操作12 semitonesとした。octave変更は全noteをpanic停止して出力gateを閉じてから行い、keydown時の物理key tokenでkeyupを解決するため、変更後noteを誤って解放する残留発音経路を作らない。画面鍵盤も同じoffsetで再描画し、現在のPC音域を文字表示する。Custom WTは読込後にLOADをREPLACEへ変え、CLEAR時は出力を閉じてslot 4を有限な1-frame sineへ置換し、使用中OSCをBasic Shapesへ戻してからセッションデータを破棄する。どちらも自動発音しない。core 72/72、Web 69/69、freestanding、構文、diff check PASS。物理出力へ未接続の実WASMは最大peak 0.008754、release後0、panic後0、clear再読込後0、NaN／Inf 0。隔離ChromiumでLOAD→REPLACE→CLEAR、OSC復帰、5画面幅の横溢れ0、browser error 0を完走。design-lintは390×844 / 1440×900でNG 0／WARN 0／測定不可0、44px未満0件、最悪コントラスト8.10:1。実ブラウザでZ/Xと表示鍵盤の同期、初期状態復帰、console log 0を確認した。音色の本人試聴、Safari／実機タッチは未確認。仕様は`SPEC_M4s.md`。
 
+- **2026-09-08 M4t Custom WT frame position（ローカル検証済み・未公開）**。
+  Custom WT読込済みかつOSC A/Bのいずれかが`Custom · Session`のときだけ、既存のCustom WT帯へ`FRAME POSITION`を表示する。A/Bの`POS`を各1〜4 frameの連続位置へ変換し、`F2 → F3 · 50%`の文字、active tick、markerを同じ位置として同期する。Customを使わない側は`OTHER WT`と明記し、Custom未選択時とCLEAR成功後は帯を隠す。表示専用のため、AudioNode、DSP、patch JSON、localStorage、出力gateを変更しない。Web 70/70、core 72/72、freestanding、構文、diff check PASS。隔離Chromiumで4-frame WAVを読み込み、A=F2→F3 50%／B=F4、CLEAR後の非表示、390px表示中の横溢れ0、既存4タブ×5画面幅の横溢れ0、browser error 0を確認。design-lintは4タブ×390×844 / 1440×900でNG 0／WARN 0／測定不可0、44px未満0件、最悪コントラスト8.10:1。仕様は`SPEC_M4t.md`。
+
+- **2026-09-08 M4u HQ FM Guardの高域深さ回復（ローカル検証済み・未公開）**。
+  本人試聴で「HQはかなり丸い」、Legacyは良好との判断を受け、既存のHQ Guardだけを調整した。45% sample-rateを越える最初のsidebandで深さを0にする安全境界は維持しつつ、その下のstrict深さ見積りを最大1.5倍へ回復し、要求FM値を超えないようにした。Legacy、既定値、既存parameter ID 78、パッチ、UI、ルーティング、C ABIは変更していない。48 kHz／C8／FM 100%ではHQ深さが0.251468から0.377203へ戻り、off-grid folded energyはLegacyの9.110 dBに対して−13.364 dB（22.474 dB低い）。C5ではHQ/Legacyがビット一致し、MIDI 0〜127のHQ深さは有限・0〜1・単調非増加を確認。opt-in PCM変更としてengine versionを17へ更新した。core 72/72、freestanding PASS、専用C8 HQ fixtureのnative/WASMはビット一致（最大差−∞ dBFS、NaN 0）。物理出力へ未接続のWorklet安全テストはHQ→Legacy切替で最大peak 0.006636、release後0、panic後0、NaN／Inf 0。Python Playwright環境が見つからず既存`tools/test-studio-ui.py`一括回帰は未実施だが、UIソースには変更なし。主観上の採否は、本人帰宅後に低音量で`?quality=1`のLegacy/HQ比較を行うまで保留。仕様は`SPEC_M4u.md`。
+
+- **2026-09-08 M4v 高域OSC／HQ FMの3 sample-rate測定（ローカル検証済み・未公開）**。
+  M4uの音源処理は変えず、C8（MIDI 108）で内蔵4 wavetableのPOS 50%と、B→A FM 100%のLegacy／HQを44.1／48／96 kHzへ拡張して固定測定するcore回帰を追加した。4 wavetable中の最悪off-grid比は順に−91.634／−91.663／−91.600 dBで、全て−60 dB基準を通過。FMのHQ深さは0.327158／0.377203／0.993138、Legacy→HQのoff-grid比は9.110→−16.554 dB（25.664 dB減）／9.110→−13.364 dB（22.474 dB減）／−6.591→−6.963 dB（0.372 dB減）。96 kHzではC8の余裕が増えHQ制限がほぼ解除されるため、同帯域での小さい差を品質低下とは扱わない。C5では全3 rateでLegacy/HQがビット一致。既存C8 HQ fixtureもnative CLIとWASMが全3 rateでビット一致、WASM NaN 0。core 73/73、freestanding、Web 70/70、物理出力未接続の安全ゲート（最大peak 0.006636、release/panic後0、NaN/Inf 0）を通過した。数値は聴感の優劣ではなく固定条件の安全／差分指標であり、本人の低音量試聴は保留。仕様は`SPEC_M4v.md`、判断用入口は`design/verify/m4v-high-range-sample-rate-20260908/index.html`。
+
+- **2026-09-08 M4w AudioWorklet再生成／sample-rate安全回帰（ローカル検証済み・未公開）**。
+  音源処理・WASM・UIを変えず、物理出力未接続の実WASM／`SynthEngineProcessor`検査を追加した。44.1／48／96 kHzごとにprocessorを新規生成し、初期8 blockの無音、C8・HQ FM保持音の有限性とpeak 0.25以下、次のrateへ移る前の旧processorへの`reset(VOICES)`後8 block無音を検査する。実測の初期peak／旧processor尾部／最終尾部は全て0、C8保持時peakは0.010312／0.010122／0.010352、NaN／Inf 0だった。テスト内のsample rate切替はprocessor生成時だけに限定し、既存の安全テストとも直列化した。これは明示resetを伴うWorklet再生成のシミュレーションであり、実ブラウザでのオーディオデバイス切替、module cache、実スピーカー出力は未検証。core 73/73、Web 71/71、WASM buildを通過した。仕様は`SPEC_M4w.md`。
+
+- **2026-09-08 M4x 実ブラウザOfflineAudioContext再生成安全確認（ローカル・非公開）**。
+  Node上のM4wに加え、HTTP配信された実ブラウザで`OfflineAudioContext`と実`AudioWorkletNode`を44.1／48／96 kHzごとに連続生成する検査ページを追加した。各rateで最初のContextはC8・HQ FMを保持したまま終了し、次に生成するContextは初期無音から同じ音を発音してnote-offする。実測で最初／再生成後の初期peakは全rate 0、旧Context末尾peakは0.008108前後、再生成後の発音peakは0.008211／0.008276／0.008977、再生成後のrelease tailは全て0、NaN／Inf 0だった。出力は`OfflineAudioContext.destination`だけへ接続し、物理スピーカー・通常AudioContext・UI操作を使っていない。これはブラウザ内のWorklet再生成を確認するが、ライブ`AudioContext.close()`、デバイス抜き差し、実デバイスsample rate変更、聴感は未検証。既存のcore 73/73、Web 71/71、freestandingを再実行して通過。仕様は`SPEC_M4x.md`、実行入口は`shells/web/tests/context-recreate-safety.html`。
+
+- **2026-09-08 M4y Browser Context再生成のCI固定（ローカル構成検証済み・未公開）**。
+  GitHub Pages workflowのbuild jobへ、WASM／core／Node Webテストの後に`make browser-context-recreate-check`を追加した。標準ライブラリだけで`tools/test-browser-context-recreate.sh`が127.0.0.1の一時HTTPサーバーと空のChrome profileを作り、`--headless=new`／`--mute-audio`／background networking停止でM4xの検査ページを実行する。`data-status="pass"`以外、60秒timeout、WASM未生成、Chrome未検出を失敗にする。新しいnpm／Python依存や公開アセットは加えていない。ローカルでは実ブラウザページの合格、スクリプト構文、Make target展開、既存core／Web回帰を確認した。GitHub Actions上の初回実行は未コミットのため未確認で、push／公開の許可も受けていない。仕様は`SPEC_M4y.md`。
+
 ## 進め方
 
 思考・設計・検証は Claude、実装は Codex へ委譲（`_claude-rules/codex-delegation.md`）。

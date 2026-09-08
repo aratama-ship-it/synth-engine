@@ -37,9 +37,15 @@ float fm_high_guard_depth(float requested, double carrierHz,
     const double upperLimit = 0.45 * sampleRate;
     const double sidebandHeadroom = (upperLimit - carrierHz) / modulatorHz;
     if (sidebandHeadroom <= 1.0) return 0.0f;
-    const double safeDepth = (sidebandHeadroom - 1.0) / (4.0 * kPi);
-    return safeDepth >= static_cast<double>(requested)
-        ? requested : static_cast<float>(safeDepth);
+    // The original 4π estimate is a strict no-fold target. It proved too
+    // dull at C8 with a full FM amount, so HQ preserves the zero-depth cutoff
+    // but recovers a bounded amount of upper-partial depth. The 1.5x recovery
+    // remains capped by the requested depth and is measured against the
+    // legacy path in the core test below.
+    const double strictDepth = (sidebandHeadroom - 1.0) / (4.0 * kPi);
+    const double recoveredDepth = strictDepth * 1.5;
+    return recoveredDepth >= static_cast<double>(requested)
+        ? requested : static_cast<float>(recoveredDepth);
 }
 
 }  // namespace synth
@@ -1885,4 +1891,4 @@ extern "C" uint32_t synth_get_tail_frames(const SynthEngine* engine) {
     return frames <= 0.0 ? 0u : static_cast<uint32_t>(frames + 0.999999);
 }
 
-extern "C" uint32_t synth_engine_version(void) { return 16; }
+extern "C" uint32_t synth_engine_version(void) { return 17; }

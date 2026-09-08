@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SynthEngine — Offline Context Recreate Safety</title>
+<style>
+  :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  body { margin: 0; background: #101216; color: #edf1f7; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 20px 48px; }
+  h1 { font: 600 20px/1.3 system-ui, sans-serif; margin: 0 0 12px; }
+  p { color: #bac3d0; line-height: 1.6; }
+  #summary { padding: 12px 14px; border: 1px solid #586271; border-radius: 8px; color: #eef3fb; }
+  #summary.pass { border-color: #3b9b75; color: #98e7bf; }
+  #summary.fail { border-color: #dc6565; color: #ffb2ae; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; color: #c8d1dc; font-size: 12px; line-height: 1.55; }
+</style>
+<main>
+  <h1>Offline Context Recreate Safety</h1>
+  <p>実ブラウザの <code>OfflineAudioContext</code> と AudioWorklet を使います。物理オーディオ出力には接続しません。</p>
+  <p id="summary" role="status" aria-live="polite">検査を開始しています…</p>
+  <pre id="details"></pre>
+</main>
+<script type="module">
+import { createSynthNode } from "../synth-node.js";
+
+const SAMPLE_RATES = [44_100, 48_000, 96_000];
+const FRAMES = 8_192;
+const NOTE_ON_FRAME = 512;
+const NOTE_OFF_FRAME = 3_072;
+const ACTIVE_FLOOR = 1e-4;
+const PEAK_CEILING = 0.25;
+const SILENCE_CEILING = 1e-7;
+const summary = document.querySelector("#summary");
+const details = document.querySelector("#details");
+
+function preset() {
+  return [
+    [0, 0], [1, 0], [2, 0.21],
+    [3, 0.001], [4, 0.01], [5, 0.78], [6, 0.03], [7, 0.1],
+    [9, 1], [17, 0], [18, 0], [19, 0], [20, 1], [26, 1], [27, 0],
+    [28, 1], [29, 0], [32, 0], [35, 0], [75, 0], [78, 1],
+    [90, 0], [94, 0], [99, 0], [103, 0],
+  ];
+}
+
+function rangeStats(buffer, startFrame, endFrame) {
+  let peak = 0;
+  let nonFinite = 0;
+  for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+    const samples = buffer.getChannelData(channel);
+    for (let frame = startFrame; frame < endFrame; frame += 1) {
+      const sample = samples[frame];
+      if (!Number.isFinite(sample)) nonFinite += 1;
+      else peak = Math.max(peak, Math.abs(sample));
+    }
+  }
+  return { peak, nonFinite };
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+async function renderContext({ sampleRate, release }) {
+  const context = new OfflineAudioContext(2, FRAMES, sampleRate);
+  const wasmBytes = window.__SYNTH_CONTEXT_RECREATE_WASM__.slice(0);
+  const synth = await createSynthNode(context, wasmBytes);
+  synth.connect(context.destination);
+  const events = [{ frame: NOTE_ON_FRAME, kind: 1, id: 1, a: 108, b: 0.7 }];
+  if (release) events.push({ frame: NOTE_OFF_FRAME, kind: 2, id: 1, a: 0, b: 0 });
+  await synth.batch(preset(), events);
+  const rendered = await context.startRendering();
+  synth.disconnect();
+  return {
+    initial: rangeStats(rendered, 0, NOTE_ON_FRAME),
+    active: rangeStats(rendered, NOTE_ON_FRAME + 256, NOTE_OFF_FRAME),
+    tail: rangeStats(rendered, FRAMES - 1_024, FRAMES),
+    all: rangeStats(rendered, 0, FRAMES),
+  };
+}
+
+function validateRate(sampleRate, held, recreated) {
+  assert(held.initial.nonFinite === 0 && recreated.initial.nonFinite === 0,
+    `${sampleRate} Hz: context start emitted NaN/Inf`);
+  assert(held.all.nonFinite === 0 && recreated.all.nonFinite === 0,
+    `${sampleRate} Hz: render emitted NaN/Inf`);
+  assert(held.initial.peak <= SILENCE_CEILING,
+    `${sampleRate} Hz: first context was not silent before note (${held.initial.peak})`);
+  assert(held.active.peak > ACTIVE_FLOOR && held.active.peak <= PEAK_CEILING,
+    `${sampleRate} Hz: held first-context peak is unsafe or absent (${held.active.peak})`);
+  assert(held.tail.peak > ACTIVE_FLOOR,
+    `${sampleRate} Hz: held first context did not remain active through context end (${held.tail.peak})`);
+  assert(recreated.initial.peak <= SILENCE_CEILING,
+    `${sampleRate} Hz: recreated context carried residual output (${recreated.initial.peak})`);
+  assert(recreated.active.peak > ACTIVE_FLOOR && recreated.active.peak <= PEAK_CEILING,
+    `${sampleRate} Hz: recreated-context note is unsafe or absent (${recreated.active.peak})`);
+  assert(recreated.tail.peak <= SILENCE_CEILING,
+    `${sampleRate} Hz: recreated context stayed audible after note-off (${recreated.tail.peak})`);
+}
+
+async function run() {
+  const response = await fetch(new URL("../../../build/synth_engine.wasm", import.meta.url));
+  assert(response.ok, `WASM fetch failed: ${response.status}`);
+  window.__SYNTH_CONTEXT_RECREATE_WASM__ = await response.arrayBuffer();
+  const results = [];
+  for (const sampleRate of SAMPLE_RATES) {
+    const held = await renderContext({ sampleRate, release: false });
+    const recreated = await renderContext({ sampleRate, release: true });
+    validateRate(sampleRate, held, recreated);
+    results.push({ sampleRate, held, recreated });
+  }
+  return results;
+}
+
+try {
+  const results = await run();
+  const result = {
+    physicalOutput: "not connected (OfflineAudioContext only)",
+    contextRecreation: "each rate creates a held first context, then a fresh released context",
+    results,
+  };
+  window.__SYNTH_CONTEXT_RECREATE_RESULT__ = result;
+  document.body.dataset.status = "pass";
+  summary.textContent = "合格 — 3 sample rateでContext再生成後の初期無音・有限性・peak・release後無音を確認しました。";
+  summary.classList.add("pass");
+  details.textContent = JSON.stringify(result, null, 2);
+} catch (error) {
+  const result = { error: String(error?.stack || error) };
+  window.__SYNTH_CONTEXT_RECREATE_RESULT__ = result;
+  document.body.dataset.status = "fail";
+  summary.textContent = "不合格 — 詳細を確認してください。";
+  summary.classList.add("fail");
+  details.textContent = result.error;
+}
+</script>

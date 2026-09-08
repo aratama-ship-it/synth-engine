@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { importSource } from "./load-module.mjs";
 
-const { createSafeWavetableFrame, parseWavetableWav } = await importSource("../wavetable-import.js");
+const { createSafeWavetableFrame, parseWavetableWav, wavetableFramePosition } = await importSource("../wavetable-import.js");
 
 function writeFourCC(view, offset, text) {
   for (let index = 0; index < 4; index += 1) view.setUint8(offset + index, text.charCodeAt(index));
@@ -66,4 +66,16 @@ test("custom wavetable clear frame is a finite, bounded, single-cycle sine", () 
   assert.equal(frame[0], 0);
   assert.ok(Math.abs(frame[512] - 0.95) < 1e-6);
   assert.ok([...frame].every((value) => Number.isFinite(value) && Math.abs(value) <= 0.950001));
+});
+
+test("custom wavetable frame position maps POS continuously across the loaded frame count", () => {
+  assert.deepEqual(wavetableFramePosition(1, 0.7), {
+    frameCount:1, normalized:.7, framePosition:0, firstFrame:1, secondFrame:1, mix:0,
+  });
+  assert.deepEqual(wavetableFramePosition(4, .5), {
+    frameCount:4, normalized:.5, framePosition:1.5, firstFrame:2, secondFrame:3, mix:.5,
+  });
+  assert.deepEqual(wavetableFramePosition(4, 2), {
+    frameCount:4, normalized:1, framePosition:3, firstFrame:4, secondFrame:4, mix:0,
+  });
 });

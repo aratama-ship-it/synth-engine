@@ -116,11 +116,17 @@ test("each oscillator exposes four built-ins plus one session-only custom waveta
   assert.match(html, /4 BUILTIN WT \+ 1 SESSION/);
   assert.match(html, /id="load-wavetable"/);
   assert.match(html, /id="clear-wavetable"[^>]*disabled/);
+  assert.match(html, /id="wavetable-frame-positions"/);
+  assert.match(html, /id="wavetable-frame-position-a"/);
+  assert.match(html, /id="wavetable-frame-position-b"/);
   assert.match(html, /LOCAL WAV · SESSION ONLY/);
   assert.match(source, /parseWavetableWav/);
   assert.match(source, /createSafeWavetableFrame\(\)/);
   assert.match(source, /REPLACE WAV/);
   assert.match(source, /clearCustomWavetable/);
+  assert.match(source, /renderCustomWavetableFramePositions/);
+  assert.match(source, /wavetableFramePosition/);
+  assert.match(source, /F\$\{position\.firstFrame\} → F\$\{position\.secondFrame\}/);
   assert.match(source, /CLEARING · OUTPUT MUTED/);
   assert.match(source, /closeOutputGate\(\); node\.reset\(0\)/);
 });

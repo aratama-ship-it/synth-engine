@@ -15,7 +15,7 @@ FREESTANDING_FLAGS := $(CORE_FLAGS) -ffreestanding -fno-stack-protector -nostdin
 CORE_SOURCES := core/src/engine.cpp core/src/wavetable.cpp
 CORE_OBJECTS := build/core/engine.o build/core/wavetable.o
 
-.PHONY: all core cli test core-freestanding-check wasm
+.PHONY: all core cli test core-freestanding-check wasm browser-context-recreate-check
 
 all: core cli
 
@@ -52,6 +52,9 @@ core-freestanding-check:
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(FREESTANDING_FLAGS) -c core/src/wavetable.cpp -o build/freestanding/wavetable.o
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(FREESTANDING_FLAGS) -c core/src/freestanding_support.cpp -o build/freestanding/freestanding_support.o
 	@echo "core-freestanding-check: PASS"
+
+browser-context-recreate-check:
+	bash tools/test-browser-context-recreate.sh
 
 wasm:
 	@mkdir -p build

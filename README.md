@@ -31,10 +31,10 @@ JUCE も AGPL か商用ライセンスの二択です。**ライセンスの都�
 
 | | 状態 |
 |---|---|
-| DSPコア | 2オペのウェーブテーブル OSC、内蔵4テーブル＋セッション用カスタム1枠、中心加重デチューン＋等間隔ステレオ配置のユニゾン最大4声、Random / Fixed / Balanced位相開始、Linear / Natural Width、B→A の位相変調（FM）と高域Guard、サブ、white/pink ノイズ、波形モーフ、Morph／FM／Levelの5 ms操作スムージング、TPT/ZDF SVF、アンプ／フィルタEGと独立したMod EG、独立2基の6波形LFO、6スロットのモジュレーションマトリクス、マクロ4本、順序変更できるDistortion / Chorus / 3-band EQ / Compressor |
+| DSPコア | 2オペのウェーブテーブル OSC、内蔵4テーブル＋セッション用カスタム1枠、中心加重デチューン＋等間隔ステレオ配置のユニゾン最大4声、Random / Fixed / Balanced位相開始、Linear / Natural Width、B→A の位相変調（FM）と、高域で深さと折返し成分を折衷するHQ Guard、サブ、white/pink ノイズ、波形モーフ、Morph／FM／Levelの5 ms操作スムージング、TPT/ZDF SVF、アンプ／フィルタEGと独立したMod EG、独立2基の6波形LFO、6スロットのモジュレーションマトリクス、マクロ4本、順序変更できるDistortion / Chorus / 3-band EQ / Compressor |
 | AUv3 プラグイン | `auval` 警告0で通過。パラメータ、状態保存、ファクトリープリセット。共有コアの4 Insertもパラメータ公開済み（M4nの署名・実ホスト確認は未実施） |
 | スタンドアロン | 起動して A〜Z キーで演奏できる |
-| ブラウザ | AudioWorkletでライブ演奏、Z／Xによる-3〜+3 octave移動、2048 samples × 1〜4 framesのセッション限定Custom WT読込・置換・安全消去、初回出力の安全フェード、エネルギー正規化したReverb IR、フォーカス喪失時のpanic停止、OfflineAudioContextでオフライン書き出し、`?quality=1`の検証画面で4声ユニゾンとFM高域処理を独立比較、Studio画面の`MATCH`で参照音をローカル測定し、根拠付きAMP ENV候補、実測較正したLP12/LP24 Filter Cutoff候補の明示適用と現在のcoreパッチとの音量補正A/B |
+| ブラウザ | AudioWorkletでライブ演奏、Z／Xによる-3〜+3 octave移動、2048 samples × 1〜4 framesのセッション限定Custom WT読込・置換・安全消去とA/B別の現在frame位置表示、初回出力の安全フェード、エネルギー正規化したReverb IR、フォーカス喪失時のpanic停止、OfflineAudioContextでオフライン書き出し、`?quality=1`の検証画面で4声ユニゾンとFM高域処理を独立比較、Studio画面の`MATCH`で参照音をローカル測定し、根拠付きAMP ENV候補、実測較正したLP12/LP24 Filter Cutoff候補の明示適用と現在のcoreパッチとの音量補正A/B |
 | フィルタ | 12/24 dB の SVF（LP/BP/HP/Notch）、キートラック、専用エンベロープ |
 | LFO | 2基とも6波形、フリーラン／ノートで頭出し。LFO 1はカットオフ・ピッチ・音量への直結とMatrix入力、LFO 2は独立したMatrix入力 |
 | モジュレーションマトリクス | 11信号源 × 13送り先、6スロット固定。Macro 1〜4とMod EGを選択でき、マクロ4本はパラメータ／`SYNTH_EV_MACRO` から5 ms平滑化つきで操作可能 |
@@ -56,14 +56,14 @@ JUCE も AGPL か商用ライセンスの二択です。**ライセンスの都�
 | 共振の実挙動 | resonance 1（Q=100）でカットオフ周波数にリンギングし 136 dB/秒 で減衰。**理論値と一致**（持続的な自己発振はしない） |
 | LFO | 6波形とも周期誤差 0%、S&H再レンダーはビット一致。設定 5 Hz で明るさが実測 毎秒 5.0 回変化 |
 | wasm サイズ | 75,383 バイト（gzip 21,094 バイト） |
-| 自動テスト | Web 69項目、core 72項目すべて PASS。Webには物理出力へ接続しないWASM／AudioWorklet安全ゲートを含む |
+| 自動テスト | Web 71項目、core 73項目すべて PASS。Webには物理出力へ接続しないWASM／AudioWorklet安全ゲートを含む。別途、実ブラウザのOfflineAudioContext再生成確認も通過 |
 
 ## 動かす
 
 必要なもの: Xcode（clang / swiftc）、GNU make、Node.js。WASM を作るなら `brew install llvm lld`。
 
 ```bash
-make test                 # コアの自動テスト72項目
+make test                 # コアの自動テスト73項目
 make cli                  # オフラインレンダラー
 ./build/render-cli --preset presets/m1_unison_saw.txt --events fixtures/m0_events_chord.txt \
     --out build/out.wav --sr 48000 --block 128 --frames 96000

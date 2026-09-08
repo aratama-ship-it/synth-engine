@@ -32,7 +32,7 @@ Chromium 系ブラウザで次を開く。
 
 PCキー`A W S E D F T G Y H U J K`または画面鍵盤の最初の操作でAudioContextを開始し、その操作自体も発音になる。`Z`で1 octave下、`X`で1 octave上へ移動し、範囲は-3〜+3 octave。移動前に押下中の全noteを解放し、画面鍵盤と現在音域表示を一緒に更新する。ダイヤルは上下ドラッグ、Shift併用の微調整、ダブルクリックの初期値復帰、単位付き数値入力、rangeのキー操作に対応する。文字入力欄とselectへ入力中だけPC鍵盤演奏を抑止する。
 
-Custom WTは未読込時の`LOAD WAV`が読込後に`REPLACE WAV`へ変わり、`CLEAR`でセッション波形を消去できる。CLEARは出力を閉じ、Custom slotを安全な1-frame sineへ置換してから、Customを使っているOSC A/BをBasic Shapesへ戻す。読込・置換・消去後はいずれも自動発音しない。
+Custom WTは未読込時の`LOAD WAV`が読込後に`REPLACE WAV`へ変わり、`CLEAR`でセッション波形を消去できる。CLEARは出力を閉じ、Custom slotを安全な1-frame sineへ置換してから、Customを使っているOSC A/BをBasic Shapesへ戻す。読込・置換・消去後はいずれも自動発音しない。Customを選択中は、共有帯の`FRAME POSITION`でA/B別に現在の`POS`を`F2 → F3 · 50%`のように示す。これは表示専用で、Custom未選択時は隠れ、音声処理やpatch保存を変えない。
 
 共有Insertはコア内部でwet/bypassを平滑化する。AudioContext停止中はDelay入力、Reverb mixなどWeb側AudioParamを予約補間せず即時値で初期化する。出力は0から25 msで開く安全ゲートを通し、初回の過大出力を防ぐ。画面鍵盤はpointer IDごとに発音を管理し、`pointerup` / `pointercancel` / `lostpointercapture`で解除する。ウインドウのblur、pagehide、非表示化では待機中と発音中のノートを消去し、コアをvoice resetして出力ゲートを閉じる。次の演奏入力で同じAudioContextを再開できる。
 
@@ -42,7 +42,7 @@ FXは`OSC / FILTER / AMP → MASTER → 共有C++ INSERTS → DRY + Web DELAY + 
 
 MATCHの候補描画後にcoreパラメータ、preset、INIT、Undo / Redo、JSON importでcore値が変わると、前の候補を比較不能にして再描画を求める。AMP ENV仮説とFilter Cutoff仮説の適用も同じ扱いで、変更は既存Undoから一手で戻せる。A/B下の包絡相関、pitch cents差、attack差、brightness差は次に触る場所を絞る補助値であり、音色の一致や完成判定ではない。仕様境界は`SPEC_M4c.md`、`SPEC_M4d.md`、`SPEC_M4e.md`。
 
-Studio UIの保存・操作面とDelay / ReverbはWeb殻に置き、共有InsertはM4nからコア／AUにも公開する。M4aではコアの内蔵4 wavetableを各4フレームへ拡張し、C ABIとパラメータ数を維持したままengine versionを9へ更新した。M4fではmip境界をalias-safeな100 cent crossfadeへ変更し、同じ境界を通るWeb / nativeコアをengine version 10へ更新した。M4gではMorph／FM／Level系8操作の5 ms平滑化と、unisonのdetune／pan配置分離をコアへ追加しengine versionを11へ更新した。M4hではBalanced位相、Natural Widthカーブ、高域FM Guardを比較用の3パラメータとして追加し、engine versionを12へ更新した。M4iでは日常のOSC操作を先頭へ戻し、`QUALITY LAB`は通常画面から外して`?quality=1`の明示的な検証URLだけに残した。M4jではAudioContext再開直後のWeb FX初期値と入力解放を安全化し、M4kではReverb IRの過大ゲインと自動復元時のプリセット表示ずれを修正した。M4lではMatrix専用の独立LFO 2を追加し、既存IDを維持したまま83パラメータ・engine version 13へ更新した。M4mではMacro 3 / 4と独立Mod EGを追加して90パラメータ・engine version 14へ、M4nでは4 Insertと順序を共通コアへ移して113パラメータ・engine version 15へ更新した。M4rではslot 4をセッション用Customへ拡張し、厳密なローカルWAV読込と非破壊検証を追加してengine version 16へ更新した。M4sではZ/X octave移動とCustom WTのREPLACE/CLEARをWeb UIへ追加し、コアとengine versionは変更していない。比較時は従来どおりユニゾンとFMを独立操作でき、Studio全体の44px操作面積とコンパクト密度も維持する。設計メモと数値トークンは`design/SYNTH_UI_DESIGN.md`、`design/SYNTH_UI_TOKEN_SHEET.md`に置く。2026-09-07の比較音と検証台帳は`design/overnight-runs/2026-09-07-serum-until-08/`に置く。
+Studio UIの保存・操作面とDelay / ReverbはWeb殻に置き、共有InsertはM4nからコア／AUにも公開する。M4aではコアの内蔵4 wavetableを各4フレームへ拡張し、C ABIとパラメータ数を維持したままengine versionを9へ更新した。M4fではmip境界をalias-safeな100 cent crossfadeへ変更し、同じ境界を通るWeb / nativeコアをengine version 10へ更新した。M4gではMorph／FM／Level系8操作の5 ms平滑化と、unisonのdetune／pan配置分離をコアへ追加しengine versionを11へ更新した。M4hではBalanced位相、Natural Widthカーブ、高域FM Guardを比較用の3パラメータとして追加し、engine versionを12へ更新した。M4iでは日常のOSC操作を先頭へ戻し、`QUALITY LAB`は通常画面から外して`?quality=1`の明示的な検証URLだけに残した。M4jではAudioContext再開直後のWeb FX初期値と入力解放を安全化し、M4kではReverb IRの過大ゲインと自動復元時のプリセット表示ずれを修正した。M4lではMatrix専用の独立LFO 2を追加し、既存IDを維持したまま83パラメータ・engine version 13へ更新した。M4mではMacro 3 / 4と独立Mod EGを追加して90パラメータ・engine version 14へ、M4nでは4 Insertと順序を共通コアへ移して113パラメータ・engine version 15へ更新した。M4rではslot 4をセッション用Customへ拡張し、厳密なローカルWAV読込と非破壊検証を追加してengine version 16へ更新した。M4sではZ/X octave移動とCustom WTのREPLACE/CLEARをWeb UIへ追加し、M4tではCustom使用中だけA/B別のframe位置を既存帯へ追加した。M4uでは既存HQ Guardだけの高域FM深さを1.5倍まで回復し、C8・100% FMの分析でLegacyより折返し成分を22.47 dB抑えたまま、深さを0.251から0.377へ戻した（engine version 17）。M4s/M4tともコアとengine versionは変更していない。比較時は従来どおりユニゾンとFMを独立操作でき、Studio全体の44px操作面積とコンパクト密度も維持する。設計メモと数値トークンは`design/SYNTH_UI_DESIGN.md`、`design/SYNTH_UI_TOKEN_SHEET.md`に置く。2026-09-07の比較音と検証台帳は`design/overnight-runs/2026-09-07-serum-until-08/`に置く。
 
 ## 確認手順
 
@@ -84,16 +84,21 @@ Worklet内部カウンタへフォールバックする。
 node --test shells/web/tests/
 ```
 
-発音・DSP・Web Audioに触れる変更では、先に現在のWASMをビルドしてから69件のWebテストを実行する。
+発音・DSP・Web Audioに触れる変更では、先に現在のWASMをビルドしてから71件のWebテストを実行する。
 `audio-safety.test.mjs`はAudioWorkletProcessorへ実WASMを読み込み、出力をAudioContextや物理デバイスへ接続せず、
 48 kHz／128 framesでCustom WT読込、初回発音、Morph変更中の発音継続、note-off後の無音、voice resetによるpanic後の無音、CLEAR用安全波形の無発音再読込、
-全サンプルの有限性と低出力プリセット時のpeak上限0.25を検査する。WASMが無いローカル実行ではこの1件をskipするが、
+全サンプルの有限性と低出力プリセット時のpeak上限0.25を検査する。加えて44.1／48／96 kHzでは、旧processorを明示resetした後の無音、新しいprocessorの初期無音、C8・HQ FM保持音の有限性と上限を検査し、processor間に保持音を持ち越さないことを固定する。これは物理出力未接続の再生成シミュレーションであり、実ブラウザのオーディオデバイス切替そのものは証明しない。WASMが無いローカル実行ではこの2件をskipするが、
 GitHub Actionsは`make wasm`の成功後に同じテストを実行するためskipしない。
+
+実ブラウザでの無出力確認は`tests/context-recreate-safety.html`をHTTPで開く。実 `OfflineAudioContext` と `AudioWorkletNode` を44.1／48／96 kHzで2回ずつ作り、保持した旧Contextの終了後に新Contextが初期無音で始まり、発音後にrelease無音へ戻ることを測る。`OfflineAudioContext.destination`だけへ接続するため物理オーディオ出力は使わない。このページはライブ`AudioContext.close()`やデバイス切替の証明ではない。GitHub Actionsでは、依存追加なしにrunner内のChromeをheadless・`--mute-audio`で実行し、ページの`data-status="pass"`以外を失敗とする。
 
 ```sh
 make wasm WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang
 node --test shells/web/tests/audio-safety.test.mjs
 node --test shells/web/tests/index.mjs
+make browser-context-recreate-check  # Chromeを検出して無出力の実ブラウザ検査
+# ブラウザで開く（物理出力なしのOfflineAudioContext検査）
+# http://127.0.0.1:8963/shells/web/tests/context-recreate-safety.html
 ```
 
 WASM と native CLI の Node 比較:

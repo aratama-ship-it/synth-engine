@@ -10,6 +10,23 @@ export function createSafeWavetableFrame() {
   return frame;
 }
 
+export function wavetableFramePosition(frameCount, position) {
+  const count = Number.isFinite(frameCount)
+    ? Math.min(MAX_WAVETABLE_FRAMES, Math.max(1, Math.trunc(frameCount))) : 1;
+  const normalized = Number.isFinite(position) ? Math.min(1, Math.max(0, position)) : 0;
+  const framePosition = normalized * (count - 1);
+  const firstFrame = Math.floor(framePosition) + 1;
+  const secondFrame = Math.min(count, firstFrame + 1);
+  return {
+    frameCount: count,
+    normalized,
+    framePosition,
+    firstFrame,
+    secondFrame,
+    mix: framePosition - Math.floor(framePosition),
+  };
+}
+
 function readFourCC(view, offset) {
   if (offset < 0 || offset + 4 > view.byteLength) throw new Error("WAVヘッダーが途中で切れています");
   return String.fromCharCode(

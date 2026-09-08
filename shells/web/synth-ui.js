@@ -8,7 +8,7 @@ import { MATCH_TARGET_RMS_DBFS, candidateRenderPlan, compareSoundAnalyses, level
 import { suggestAmpEnvelope } from "./envelope-match.js";
 import { estimateFilterCutoff, planFilterCutoffProbe } from "./filter-match.js";
 import { createNoteRegistry } from "./note-registry.js";
-import { createSafeWavetableFrame, parseWavetableWav } from "./wavetable-import.js?m4s=1";
+import { createSafeWavetableFrame, parseWavetableWav, wavetableFramePosition } from "./wavetable-import.js?m4t=1";
 import { clampKeyboardOctave, keyboardInputId, keyboardOctaveLabel, noteForKeyboardEvent, octaveDeltaForKeyboardEvent } from "./keyboard-input.js?m4s=1";
 
 const paths = { wasm: "../../build/synth_engine.wasm?m4r=1", presets: "../../presets/" };
@@ -403,6 +403,55 @@ function renderWaveform(svgId, slotId, positionId) {
   svg.querySelector(".wave-line").setAttribute("d", graphPath(520, 152, (x) => oscillatorSample(slot, position, x * 2)));
   svg.setAttribute("aria-label", `${wavetableNames[slot]}、position ${Math.round(position * 100)}% の設定波形`);
 }
+function customFramePositionLabel(position) {
+  if (position.frameCount === 1) return "F1 · FIXED";
+  if (position.firstFrame === position.secondFrame || position.mix < .005) return `F${position.firstFrame}`;
+  return `F${position.firstFrame} → F${position.secondFrame} · ${Math.round(position.mix * 100)}%`;
+}
+function renderCustomWavetableFrameRow(element, oscillator, slotId, positionId) {
+  element.replaceChildren();
+  const label = document.createElement("strong");
+  label.textContent = `OSC ${oscillator}`;
+  const output = document.createElement("output");
+  output.className = "wavetable-frame-output";
+  if (Math.round(values.get(slotId)) !== CUSTOM_WAVETABLE_SLOT) {
+    element.className = "wavetable-frame-row is-other-wavetable";
+    output.textContent = "OTHER WT";
+    element.setAttribute("aria-label", `OSC ${oscillator}: OTHER WT`);
+    element.append(label, output);
+    return;
+  }
+  const position = wavetableFramePosition(customWavetable.frameCount, values.get(positionId) ?? 0);
+  const track = document.createElement("div");
+  track.className = "wavetable-frame-track";
+  track.style.setProperty("--frame-position", String(position.normalized));
+  track.setAttribute("aria-hidden", "true");
+  for (let frame = 1; frame <= position.frameCount; frame += 1) {
+    const tick = document.createElement("span");
+    tick.className = "wavetable-frame-tick";
+    tick.textContent = String(frame);
+    if (frame === position.firstFrame || frame === position.secondFrame) tick.classList.add("is-current");
+    track.append(tick);
+  }
+  const marker = document.createElement("span");
+  marker.className = "wavetable-frame-marker";
+  track.append(marker);
+  const text = customFramePositionLabel(position);
+  output.textContent = text;
+  element.className = "wavetable-frame-row";
+  element.setAttribute("aria-label", `OSC ${oscillator}: ${text}`);
+  element.append(label, track, output);
+}
+function renderCustomWavetableFramePositions() {
+  const panel = elements["wavetable-frame-positions"];
+  if (!panel) return;
+  const hasSelectedCustom = customWavetable.frames && [0, 17].some((id) =>
+    Math.round(values.get(id)) === CUSTOM_WAVETABLE_SLOT);
+  panel.hidden = !hasSelectedCustom;
+  if (!hasSelectedCustom) return;
+  renderCustomWavetableFrameRow(elements["wavetable-frame-position-a"], "A", 0, 1);
+  renderCustomWavetableFrameRow(elements["wavetable-frame-position-b"], "B", 17, 18);
+}
 function envelopeRemaining(progress, curve) {
   const exponential = (2 ** (-8 * progress) - 2 ** -8) / (1 - 2 ** -8);
   return (1 - curve) * exponential + curve * (1 - progress);
@@ -446,6 +495,7 @@ function renderLfo(svgId, shapeId, phaseId, label) {
 function updateVisuals(id) {
   if ([0, 1].includes(id)) renderWaveform("wave-a", 0, 1);
   if ([17, 18].includes(id)) renderWaveform("wave-b", 17, 18);
+  if ([0, 1, 17, 18].includes(id)) renderCustomWavetableFramePositions();
   if ([3, 4, 5, 6, 53].includes(id)) renderEnvelope("env-amp-graph", [3, 4, 5, 6, 53]);
   if ([41, 42, 43, 44, 54].includes(id)) renderEnvelope("env-filter-graph", [41, 42, 43, 44, 54]);
   if ([47, 52].includes(id)) renderLfo("lfo-graph", 47, 52, "LFO 1");
@@ -1204,6 +1254,7 @@ async function clearCustomWavetable() {
     customWavetable.name = "";
     visualFrameGain.clear();
     renderWaveform("wave-a", 0, 1); renderWaveform("wave-b", 17, 18);
+    renderCustomWavetableFramePositions();
     elements["wavetable-import-state"].textContent = "NOT LOADED";
     elements["wavetable-import-state"].removeAttribute("title");
     setStatus("CUSTOM WTを消去し、使用中のOSCをBasic Shapesへ戻しました。出力はミュート中です。");
@@ -1238,6 +1289,7 @@ function installWavetableImport() {
       customWavetable.name = file.name;
       visualFrameGain.clear();
       renderWaveform("wave-a", 0, 1); renderWaveform("wave-b", 17, 18);
+      renderCustomWavetableFramePositions();
       elements["wavetable-import-state"].textContent =
         `READY · ${parsed.frameCount}F · ${parsed.sampleRate.toLocaleString()} Hz`;
       elements["wavetable-import-state"].title = file.name;

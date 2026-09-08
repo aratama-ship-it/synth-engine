@@ -11,8 +11,8 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--url", default="http://127.0.0.1:8963/shells/web/synth.html?m4s=1")
-parser.add_argument("--out", type=Path, default=Path("design/verify/m4s-performance-wt-20260908"))
+parser.add_argument("--url", default="http://127.0.0.1:8963/shells/web/synth.html?m4t=1")
+parser.add_argument("--out", type=Path, default=Path("design/verify/m4t-wavetable-frame-position-20260908"))
 parser.add_argument("--design-lint", type=Path)
 args = parser.parse_args()
 args.out.mkdir(parents=True, exist_ok=True)
@@ -24,8 +24,12 @@ def passed(name):
     print(f"PASS {name}", flush=True)
 
 
-def wavetable_wav():
-    samples = [round(math.sin(index / 2048 * math.tau) * 0.75 * 32767) for index in range(2048)]
+def wavetable_wav(frame_count=1):
+    samples = [
+        round(math.sin(index / 2048 * math.tau) * (0.45 + frame * 0.1) * 32767)
+        for frame in range(frame_count)
+        for index in range(2048)
+    ]
     payload = struct.pack("<" + "h" * len(samples), *samples)
     return (
         b"RIFF" + struct.pack("<I", 36 + len(payload)) + b"WAVE"
@@ -52,7 +56,7 @@ with sync_playwright() as p:
     expect(page.locator("#wave-picker-a select")).to_have_value("0")
     expect(page.locator("#wavetable-import-state")).to_have_text("LOAD WAV FIRST")
     page.locator("#wavetable-file").set_input_files({
-        "name": "m4s-test.wav", "mimeType": "audio/wav", "buffer": wavetable_wav()
+        "name": "m4t-four-frame-test.wav", "mimeType": "audio/wav", "buffer": wavetable_wav(4)
     })
     expect(page.locator("#wavetable-import-state")).to_contain_text("READY", timeout=10000)
     expect(page.locator("#status")).to_contain_text("出力はミュート中")
@@ -60,13 +64,29 @@ with sync_playwright() as p:
     expect(page.locator("#clear-wavetable")).to_be_enabled()
     page.locator("#wave-picker-a select").select_option("4")
     expect(page.locator("#wave-picker-a select")).to_have_value("4")
+    expect(page.locator("#wavetable-frame-positions")).to_be_visible()
+    expect(page.locator("#wavetable-frame-position-a")).to_contain_text("F1")
+    expect(page.locator("#wavetable-frame-position-b")).to_contain_text("OTHER WT")
+    page.locator('#osc-a [data-param-id="1"] input[type="range"]').evaluate(
+        "element => { element.value = '0.5'; element.dispatchEvent(new Event('input', { bubbles:true })); }")
+    expect(page.locator("#wavetable-frame-position-a")).to_contain_text("F2 → F3 · 50%")
+    page.locator("#wave-picker-b select").select_option("4")
+    page.locator('#osc-b [data-param-id="18"] input[type="range"]').evaluate(
+        "element => { element.value = '1'; element.dispatchEvent(new Event('input', { bubbles:true })); }")
+    expect(page.locator("#wavetable-frame-position-b")).to_contain_text("F4")
+    page.screenshot(path=str(args.out / "custom-wavetable-frame-position.png"))
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("document.documentElement.scrollWidth") == 390
+    page.screenshot(path=str(args.out / "custom-wavetable-frame-position-mobile.png"))
+    page.set_viewport_size({"width": 1440, "height": 900})
     page.screenshot(path=str(args.out / "custom-wavetable.png"))
     page.locator("#clear-wavetable").click()
     expect(page.locator("#wavetable-import-state")).to_have_text("NOT LOADED")
     expect(page.locator("#wave-picker-a select")).to_have_value("0")
     expect(page.locator("#load-wavetable")).to_have_text("LOAD WAV")
     expect(page.locator("#clear-wavetable")).to_be_disabled()
-    passed("Custom WAV load, replace state, clear fallback, and muted output are guarded")
+    expect(page.locator("#wavetable-frame-positions")).to_be_hidden()
+    passed("Custom WAV frame position fits desktop/mobile; replace state, clear fallback, and muted output are guarded")
 
     def patch():
         return page.evaluate("JSON.parse(localStorage.getItem('synth-engine.studio.autosave.v1'))")
@@ -76,6 +96,7 @@ with sync_playwright() as p:
         page.locator('#osc-a [data-param-id="1"] .mod-assign').click()
         expect(page.locator("#mod-dialog")).to_be_visible()
 
+    page.wait_for_timeout(250)  # CLEAR returns OSC selectors to Basic Shapes through the 180 ms autosave debounce.
     baseline = patch()
     page.locator("#patch-tools-toggle").click()
     page.locator("#preset-search").fill("Bell")
@@ -197,7 +218,7 @@ with sync_playwright() as p:
         lint = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(lint)
         for tab in ["osc", "fx", "matrix", "match"]:
-            target = {"name": f"SynthEngine M4s {tab.upper()}", "url": args.url + f"&tab={tab}", "note": "Performance octave and Custom WT lifecycle UI; fresh context, no listening claim"}
+            target = {"name": f"SynthEngine M4t {tab.upper()}", "url": args.url + f"&tab={tab}", "note": "Custom WT frame position UI; fresh context, no listening claim"}
             out = args.out / tab
             results = lint.run_target(browser, target, out, [(390, 844), (1440, 900)])
             lint.write_report(target, results, out)

@@ -33,6 +33,11 @@ jobs:
           make test
           node --test shells/web/tests/index.mjs
 
+      - name: Browser context recreation safety
+        env:
+          CHROME_BIN: google-chrome
+        run: make browser-context-recreate-check
+
       - name: Assemble public site
         run: |
           install -d _site/shells/web _site/presets _site/build

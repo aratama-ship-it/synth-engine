@@ -44,7 +44,7 @@ async function waitUntilReady(processor, messages) {
   assert.equal(processor.ready, true, "AudioWorklet processor did not initialize within 5 seconds");
 }
 
-test("silent safety gate: parameter change, note release, and panic remain bounded", async (context) => {
+test("silent safety gate: high-FM quality change, note release, and panic remain bounded", { concurrency: false }, async (context) => {
   const wasmPath = new URL("../../../build/synth_engine.wasm", import.meta.url);
   const wasmBytes = await readFile(wasmPath).catch((error) => {
     if (error?.code === "ENOENT") {
@@ -80,15 +80,16 @@ test("silent safety gate: parameter change, note release, and panic remain bound
       params: [
         [0, 4], [1, 0], [2, 0.2],
         [3, 0.001], [4, 0.01], [5, 0.8], [6, 0.02], [7, 0.1],
-        [9, 1], [19, 0], [29, 0], [32, 0], [35, 0], [75, 0],
+        [9, 1], [17, 0], [18, 0], [19, 0], [20, 1], [26, 1], [27, 0],
+        [28, 1], [78, 1], [29, 0], [32, 0], [35, 0], [75, 0],
         [90, 0], [94, 0], [99, 0], [103, 0],
       ],
     });
     processor.receive({
       type: "events",
       events: [
-        { frame: 0, kind: 1, id: 1, a: 60, b: 0.5 },
-        { frame: 4096, kind: 3, id: 1, a: 0.75, b: 0 },
+        { frame: 0, kind: 1, id: 1, a: 108, b: 0.5 },
+        { frame: 4096, kind: 3, id: 78, a: 0, b: 0 },
         { frame: 8192, kind: 2, id: 1, a: 0, b: 0 },
       ],
     });
@@ -173,6 +174,117 @@ test("silent safety gate: parameter change, note release, and panic remain bound
     }));
   } finally {
     if (sampleRateDescriptor) Object.defineProperty(globalThis, "sampleRate", sampleRateDescriptor);
+    else delete globalThis.sampleRate;
+  }
+});
+
+test("silent safety gate: fresh Worklet instances at 44.1/48/96 kHz never carry held output", { concurrency: false }, async (context) => {
+  const wasmPath = new URL("../../../build/synth_engine.wasm", import.meta.url);
+  const wasmBytes = await readFile(wasmPath).catch((error) => {
+    if (error?.code === "ENOENT") {
+      context.skip("build/synth_engine.wasm is missing; run `make wasm WASM_CLANG=...` first");
+      return null;
+    }
+    throw error;
+  });
+  if (!wasmBytes) return;
+
+  const originalSampleRate = Object.getOwnPropertyDescriptor(globalThis, "sampleRate");
+  const sampleRates = [44_100, 48_000, 96_000];
+  const summaries = [];
+  let previous = null;
+
+  const withSampleRate = async (sampleRate, action) => {
+    Object.defineProperty(globalThis, "sampleRate", {
+      configurable: true,
+      value: sampleRate,
+    });
+    try {
+      return await action();
+    } finally {
+      if (originalSampleRate) Object.defineProperty(globalThis, "sampleRate", originalSampleRate);
+      else delete globalThis.sampleRate;
+    }
+  };
+
+  const renderBlocks = (processor, count) => {
+    let peak = 0;
+    let nonFinite = 0;
+    for (let block = 0; block < count; block += 1) {
+      const rendered = renderBlock(processor);
+      peak = Math.max(peak, rendered.peak);
+      nonFinite += rendered.nonFinite;
+    }
+    return { peak, nonFinite };
+  };
+
+  try {
+    for (const sampleRate of sampleRates) {
+      let handoffTail = 0;
+      if (previous) {
+        previous.processor.receive({ type: "reset", kind: 1, seed: sampleRate });
+        const previousTail = renderBlocks(previous.processor, 8);
+        handoffTail = previousTail.peak;
+        assert.equal(previousTail.nonFinite, 0, `old ${previous.sampleRate} Hz processor must stay finite during handoff`);
+        assert.ok(handoffTail <= SILENCE_CEILING,
+          `old ${previous.sampleRate} Hz processor must be silent after handoff reset (${handoffTail})`);
+      }
+
+      const { processor } = await withSampleRate(sampleRate, async () => {
+        const wasmBuffer = wasmBytes.buffer.slice(
+          wasmBytes.byteOffset,
+          wasmBytes.byteOffset + wasmBytes.byteLength,
+        );
+        const nextProcessor = new SynthEngineProcessor({ processorOptions: { wasmBytes: wasmBuffer } });
+        const nextMessages = [];
+        nextProcessor.port.postMessage = (message) => nextMessages.push(message);
+        await waitUntilReady(nextProcessor, nextMessages);
+        return { processor: nextProcessor, messages: nextMessages };
+      });
+
+      const initial = renderBlocks(processor, 8);
+      assert.equal(initial.nonFinite, 0, `fresh ${sampleRate} Hz processor must start finite`);
+      assert.ok(initial.peak <= SILENCE_CEILING,
+        `fresh ${sampleRate} Hz processor must start silent (${initial.peak})`);
+
+      processor.receive({
+        type: "preset",
+        params: [
+          [0, 0], [1, 0], [2, 0.21],
+          [3, 0.001], [4, 0.01], [5, 0.78], [6, 0.03], [7, 0.1],
+          [9, 1], [17, 0], [18, 0], [19, 0], [20, 1], [26, 1], [27, 0],
+          [28, 1], [29, 0], [32, 0], [35, 0], [75, 0], [78, 1],
+          [90, 0], [94, 0], [99, 0], [103, 0],
+        ],
+      });
+      processor.receive({
+        type: "events",
+        events: [{ frame: processor.renderFrame, kind: 1, id: 1, a: 108, b: 0.7 }],
+      });
+      const held = renderBlocks(processor, 8);
+      assert.equal(held.nonFinite, 0, `${sampleRate} Hz held note must stay finite`);
+      assert.ok(held.peak > ACTIVE_FLOOR,
+        `${sampleRate} Hz held note must become audible in the Worklet buffer (${held.peak})`);
+      assert.ok(held.peak <= TEST_PEAK_CEILING,
+        `${sampleRate} Hz held note must stay below the safety ceiling (${held.peak})`);
+      summaries.push({ sampleRate, initialPeak: initial.peak, heldPeak: held.peak, handoffTail });
+      previous = { processor, sampleRate };
+    }
+
+    previous.processor.receive({ type: "reset", kind: 1, seed: 1 });
+    const finalTail = renderBlocks(previous.processor, 8);
+    assert.equal(finalTail.nonFinite, 0, "final processor must stay finite after handoff reset");
+    assert.ok(finalTail.peak <= SILENCE_CEILING,
+      `final processor must be silent after handoff reset (${finalTail.peak})`);
+
+    context.diagnostic(JSON.stringify({
+      physicalOutput: "disconnected",
+      reconfiguration: "fresh SynthEngineProcessor after explicit handoff reset",
+      sampleRates: summaries,
+      finalTail: finalTail.peak,
+    }));
+  } finally {
+    if (originalSampleRate) Object.defineProperty(globalThis, "sampleRate", originalSampleRate);
     else delete globalThis.sampleRate;
   }
 });
