@@ -82,6 +82,18 @@ Worklet内部カウンタへフォールバックする。
 node --test shells/web/tests/
 ```
 
+発音・DSP・Web Audioに触れる変更では、先に現在のWASMをビルドしてから63件のWebテストを実行する。
+`audio-safety.test.mjs`はAudioWorkletProcessorへ実WASMを読み込み、出力をAudioContextや物理デバイスへ接続せず、
+48 kHz／128 framesで初回発音、Morph変更中の発音継続、note-off後の無音、voice resetによるpanic後の無音、
+全サンプルの有限性と低出力プリセット時のpeak上限0.25を検査する。WASMが無いローカル実行ではこの1件をskipするが、
+GitHub Actionsは`make wasm`の成功後に同じテストを実行するためskipしない。
+
+```sh
+make wasm WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang
+node --test shells/web/tests/audio-safety.test.mjs
+node --test shells/web/tests/index.mjs
+```
+
 WASM と native CLI の Node 比較:
 
 ```sh
