@@ -25,6 +25,10 @@ if [ ! -s "$project_root/build/synth_engine.wasm" ]; then
   exit 1
 fi
 
+if [ -n "$chrome_bin" ] && [ ! -x "$chrome_bin" ] && command -v "$chrome_bin" >/dev/null 2>&1; then
+  chrome_bin="$(command -v "$chrome_bin")"
+fi
+
 if [ -z "$chrome_bin" ]; then
   for candidate in \
     google-chrome google-chrome-stable chromium chromium-browser \
