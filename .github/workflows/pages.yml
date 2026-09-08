@@ -36,6 +36,7 @@ jobs:
       - name: Browser context recreation safety
         env:
           CHROME_BIN: google-chrome
+          CHROMEDRIVER_BIN: chromedriver
         run: make browser-context-recreate-check
 
       - name: Assemble public site

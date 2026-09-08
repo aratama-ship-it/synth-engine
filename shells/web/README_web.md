@@ -90,7 +90,7 @@ node --test shells/web/tests/
 全サンプルの有限性と低出力プリセット時のpeak上限0.25を検査する。加えて44.1／48／96 kHzでは、旧processorを明示resetした後の無音、新しいprocessorの初期無音、C8・HQ FM保持音の有限性と上限を検査し、processor間に保持音を持ち越さないことを固定する。これは物理出力未接続の再生成シミュレーションであり、実ブラウザのオーディオデバイス切替そのものは証明しない。WASMが無いローカル実行ではこの2件をskipするが、
 GitHub Actionsは`make wasm`の成功後に同じテストを実行するためskipしない。
 
-実ブラウザでの無出力確認は`tests/context-recreate-safety.html`をHTTPで開く。実 `OfflineAudioContext` と `AudioWorkletNode` を44.1／48／96 kHzで2回ずつ作り、保持した旧Contextの終了後に新Contextが初期無音で始まり、発音後にrelease無音へ戻ることを測る。`OfflineAudioContext.destination`だけへ接続するため物理オーディオ出力は使わない。このページはライブ`AudioContext.close()`やデバイス切替の証明ではない。GitHub Actionsでは、依存追加なしにrunner内のChromeをheadless・`--mute-audio`で実行し、ページの`data-status="pass"`以外を失敗とする。
+実ブラウザでの無出力確認は`tests/context-recreate-safety.html`をHTTPで開く。実 `OfflineAudioContext` と `AudioWorkletNode` を44.1／48／96 kHzで2回ずつ作り、保持した旧Contextの終了後に新Contextが初期無音で始まり、発音後にrelease無音へ戻ることを測る。`OfflineAudioContext.destination`だけへ接続するため物理オーディオ出力は使わない。このページはライブ`AudioContext.close()`やデバイス切替の証明ではない。GitHub Actionsでは、依存追加なしにrunner内のChrome／ChromeDriverをheadless・`--mute-audio`で実行し、WebDriverがページの`data-status="pass"`を確認できない場合を失敗とする。
 
 ```sh
 make wasm WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang

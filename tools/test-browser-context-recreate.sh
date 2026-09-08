@@ -5,9 +5,10 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 port="${BROWSER_TEST_PORT:-8964}"
 url="http://127.0.0.1:${port}/shells/web/tests/context-recreate-safety.html?ci=1"
 chrome_bin="${CHROME_BIN:-}"
+driver_bin="${CHROMEDRIVER_BIN:-}"
 server_pid=""
 profile_dir=""
-chrome_log=""
+driver_log=""
 
 cleanup() {
   if [ -n "$server_pid" ]; then
@@ -49,6 +50,28 @@ if [ -z "$chrome_bin" ] || [ ! -x "$chrome_bin" ]; then
   exit 1
 fi
 
+if [ -n "$driver_bin" ] && [ ! -x "$driver_bin" ] && command -v "$driver_bin" >/dev/null 2>&1; then
+  driver_bin="$(command -v "$driver_bin")"
+fi
+
+if [ -z "$driver_bin" ]; then
+  for candidate in chromedriver chromium-driver; do
+    if [ -x "$candidate" ]; then
+      driver_bin="$candidate"
+      break
+    fi
+    if command -v "$candidate" >/dev/null 2>&1; then
+      driver_bin="$(command -v "$candidate")"
+      break
+    fi
+  done
+fi
+
+if [ -z "$driver_bin" ] || [ ! -x "$driver_bin" ]; then
+  echo "no ChromeDriver found; set CHROMEDRIVER_BIN" >&2
+  exit 1
+fi
+
 profile_dir="$(mktemp -d "${TMPDIR:-/tmp}/synth-engine-browser.XXXXXX")"
 python3 -m http.server "$port" --bind 127.0.0.1 --directory "$project_root" >/dev/null 2>&1 &
 server_pid="$!"
@@ -64,41 +87,16 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
   sleep 1
 done
 
-chrome_args=(
-  "$chrome_bin"
-  --headless=new
-  --no-sandbox
-  --disable-gpu
-  --disable-dev-shm-usage
-  --disable-background-networking
-  --disable-component-update
-  --disable-default-apps
-  --no-default-browser-check
-  --no-first-run
-  --mute-audio
-  --virtual-time-budget=30000
-  --user-data-dir="$profile_dir"
-  --dump-dom
-  "$url"
-)
-chrome_log="$profile_dir/chrome.stderr.log"
-run_chrome() {
-  if command -v timeout >/dev/null 2>&1; then
-    timeout 60s "${chrome_args[@]}"
-  else
-    "${chrome_args[@]}"
-  fi
-}
-if ! dom="$(run_chrome 2>"$chrome_log")"; then
-  echo "headless browser failed while running context recreation safety" >&2
-  [ -f "$chrome_log" ] && cat "$chrome_log" >&2
-  exit 1
-fi
-
-if ! grep -Fq 'data-status="pass"' <<<"$dom"; then
-  echo "browser context recreate safety did not report pass" >&2
-  [ -f "$chrome_log" ] && cat "$chrome_log" >&2
-  printf '%s\n' "$dom" >&2
+driver_log="$profile_dir/chromedriver.stderr.log"
+if ! python3 "$project_root/tools/run-webdriver-context-recreate.py" \
+  --driver "$driver_bin" \
+  --browser "$chrome_bin" \
+  --url "$url" \
+  --profile-dir "$profile_dir" \
+  --driver-log "$driver_log" \
+  --timeout-seconds 60; then
+  echo "browser context recreate safety failed" >&2
+  [ -f "$driver_log" ] && cat "$driver_log" >&2
   exit 1
 fi
 
