@@ -20,5 +20,5 @@ M4y初回CIで、Chrome CLIの`--dump-dom`が`OfflineAudioContext`の非同期re
 
 ## 検証境界
 
-- ChromeDriver／Chromeのrunner提供有無と実ページの合格は、修正commitのGitHub Actionsログで確認するまで未確定とする。
+- GitHub Actions run `34205807512`（commit `17fd7ea`）でrunner Chrome／ChromeDriver、ページの`pass`、Pages deployまで確認した。runner image更新後は次の実行ログで再確認する。
 - ライブContext close、デバイス切替、実スピーカー、聴感は対象外。

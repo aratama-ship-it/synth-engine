@@ -362,8 +362,8 @@ C++ CLIレンダラー（プリセット＋イベントJSON → WAV）を基準�
 - **2026-09-08 M4x 実ブラウザOfflineAudioContext再生成安全確認（ローカル・非公開）**。
   Node上のM4wに加え、HTTP配信された実ブラウザで`OfflineAudioContext`と実`AudioWorkletNode`を44.1／48／96 kHzごとに連続生成する検査ページを追加した。各rateで最初のContextはC8・HQ FMを保持したまま終了し、次に生成するContextは初期無音から同じ音を発音してnote-offする。実測で最初／再生成後の初期peakは全rate 0、旧Context末尾peakは0.008108前後、再生成後の発音peakは0.008211／0.008276／0.008977、再生成後のrelease tailは全て0、NaN／Inf 0だった。出力は`OfflineAudioContext.destination`だけへ接続し、物理スピーカー・通常AudioContext・UI操作を使っていない。これはブラウザ内のWorklet再生成を確認するが、ライブ`AudioContext.close()`、デバイス抜き差し、実デバイスsample rate変更、聴感は未検証。既存のcore 73/73、Web 71/71、freestandingを再実行して通過。仕様は`SPEC_M4x.md`、実行入口は`shells/web/tests/context-recreate-safety.html`。
 
-- **2026-09-08 M4y Browser Context再生成のCI固定（ローカル構成検証済み・未公開）**。
-  GitHub Pages workflowのbuild jobへ、WASM／core／Node Webテストの後に`make browser-context-recreate-check`を追加した。標準ライブラリだけで`tools/test-browser-context-recreate.sh`が127.0.0.1の一時HTTPサーバーと空のChrome profileを作り、`--headless=new`／`--mute-audio`／background networking停止でM4xの検査ページを実行する。`data-status="pass"`以外、60秒timeout、WASM未生成、Chrome未検出を失敗にする。新しいnpm／Python依存や公開アセットは加えていない。ローカルでは実ブラウザページの合格、スクリプト構文、Make target展開、既存core／Web回帰を確認した。GitHub Actions上の初回実行は未コミットのため未確認で、push／公開の許可も受けていない。仕様は`SPEC_M4y.md`。
+- **2026-09-08 M4y／M4z Browser Context再生成のCI固定（GitHub Actions／Pages確認済み）**。
+  GitHub Pages workflowのbuild jobへ、WASM／core／Node Webテストの後に`make browser-context-recreate-check`を追加した。127.0.0.1の一時HTTPサーバー、空のChrome profile、`--headless=new`／`--mute-audio`、OfflineAudioContextを使い、物理スピーカーを使わない。初回のChrome CLI `--dump-dom`は非同期render完了前にDOMを取得したため、Python標準ライブラリだけのChromeDriver sessionへ変更し、`data-status="pass"`を最大60秒pollする。Chromeのbare command解決とdriver起動の最大30秒待機も固定した。run `34205807512`（commit `17fd7ea`）でcore 73/73、Web 71/71、Browser Context再生成、artifact、Pages deployまで成功し、公開`synth.html`はHTTP 200かつローカルとSHA-256一致を確認した。npm／pip installや公開音源の追加はない。ライブ`AudioContext.close()`、デバイス変更、実スピーカー、聴感は未検証。仕様は`SPEC_M4y.md`／`SPEC_M4z.md`。
 
 ## 進め方
 

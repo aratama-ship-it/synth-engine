@@ -19,5 +19,5 @@ M4xの実ブラウザ・無出力検査を、GitHub Pages workflowのビルド�
 
 ## 検証境界
 
-- CI上の実行結果は、初回のpush後にGitHub Actionsログで確認するまで未確認とする。
+- GitHub Actions run `34205807512`（commit `17fd7ea`）でbuild、WebDriver経由の`data-status="pass"`、Pages deployまで成功した。runner image更新後も、次の実行ログで同じ条件を確認する。
 - ライブ`AudioContext.close()`、オーディオデバイス変更、実スピーカー出力、聴感は対象外。
