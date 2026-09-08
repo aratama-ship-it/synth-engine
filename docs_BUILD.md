@@ -66,12 +66,15 @@ Webの高水準APIはこのIDを不透明なNoteHandleで管理し、CLIや`send
 内蔵wavetableのslotは 0 Basic Shapes、1 Analog Sweep、2 Digital Edge、
 3 Hollow Formantです。全slotが4フレームを持ち、morphで隣接フレーム間を移動します。
 各slotのmorph 0は従来どおり sine / saw / square / triangleです。
+slot 4はセッション用Customです。未読込時は安全なsine 1フレームで初期化し、
+`synth_load_wavetable()`で2048 samples × 1〜4 framesを読み込みます。入力は全フレーム検証後に
+DC除去・peak 0.95正規化・10段mip生成を行い、無音・NaN・Inf・過大値は既存内容を保持して拒否します。
 
-## パラメータ一覧（engine version 15）
+## パラメータ一覧（engine version 16）
 
 | ID | 名前 | 範囲 | 既定 |
 |---:|---|---:|---:|
-| 0 | oscAWavetable | 0..3 int | 0 |
+| 0 | oscAWavetable | 0..4 int | 0 |
 | 1 | oscAMorph | 0..1 | 0 |
 | 2 | oscALevel | 0..4 | 0.8 |
 | 3 | ampAttack | 0..60 s | 0.005 |
@@ -88,7 +91,7 @@ Webの高水準APIはこのIDを不透明なNoteHandleで管理し、CLIや`send
 | 14 | oscAFine | -100..100 cent | 0 |
 | 15 | oscAPhaseMode | 0..2 int | 0 |
 | 16 | oscAPhase | 0..1 | 0 |
-| 17 | oscBWavetable | 0..3 int | 0 |
+| 17 | oscBWavetable | 0..4 int | 0 |
 | 18 | oscBMorph | 0..1 | 0 |
 | 19 | oscBLevel | 0..4 | 0 |
 | 20 | oscBUnison | 1..4 int | 1 |
@@ -236,7 +239,7 @@ WASM_CLANG が未設定なら成功扱いでskipを表示します。LLVM clang�
 
     WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang make wasm
 
-## テスト71項目
+## テスト72項目
 
 tests/test_main.cpp はフレームワークを使わず、次を測定します。
 
@@ -312,6 +315,7 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 69. 4 Insertそれぞれのfinite出力と変化、順序差、重複／不正順序の既定順フォールバック
 70. 4 Insert有効時のblock 1／128一致、reset履歴消去、Chorus 22 msを含むtail frames
 71. 6スロット・LP24・16音×unison 4・全Insert有効時の平均／p99処理時間と期限判定
+72. Custom slotの安全な初期値、1〜4 frame読込、全mip peak 0.95上限、selector範囲、無音／非有限入力の非破壊拒否
 
 エイリアス測定は4-term Blackman-Harris窓を使い、基音電力に対する「基音より上、かつ
 期待される第1〜4倍音の各±10 binを除いた電力」の比です。MIDI 108では選択される

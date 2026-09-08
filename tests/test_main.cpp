@@ -890,7 +890,7 @@ static bool test_parameter_sweep() {
         }
     }
     const bool ok = renders == synth::kParamCount * 3u && nonFinite == 0 &&
-                    peak <= 8.0 && synth_engine_version() == 15;
+                    peak <= 8.0 && synth_engine_version() == 16;
     std::printf("%s 19 parameter sweep: renders=%u nan_inf=%llu peak=%.9f limit=8.000000 version=%u\n",
                 ok ? "PASS" : "FAIL", renders,
                 static_cast<unsigned long long>(nonFinite), peak, synth_engine_version());
@@ -2652,7 +2652,7 @@ static bool test_builtin_wavetable_palette() {
     bool finite = true;
     double smallestDifferenceRms = 1.0e9;
     double largestPeakError = 0.0;
-    for (uint32_t slot = 0; slot < synth::kWavetableSlots; ++slot) {
+    for (uint32_t slot = 0; slot < synth::kBuiltinWavetableSlots; ++slot) {
         framesValid = framesValid &&
             engine->wavetable.frameCount[slot] == synth::kMaxWavetableFrames;
         for (uint32_t frame = 0; frame < synth::kMaxWavetableFrames; ++frame)
@@ -2679,10 +2679,77 @@ static bool test_builtin_wavetable_palette() {
             largestPeakError, std::fabs(lastPeak / firstPeak - 1.0));
     }
     const bool ok = selectorsDiscrete && framesValid && finite && smallestDifferenceRms >= 0.25 &&
-                    largestPeakError <= 1.0e-5 && synth_engine_version() == 15;
+                    largestPeakError <= 1.0e-5 && synth_engine_version() == 16;
     std::printf("%s 61 builtin wavetable palette: slots=4 frames=4 selectors=integer min_endpoint_diff_rms=%.6f max_peak_error=%.9f version=%u\n",
                 ok ? "PASS" : "FAIL", smallestDifferenceRms, largestPeakError,
                 synth_engine_version());
+    return ok;
+}
+
+static bool test_custom_wavetable_loading() {
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 128);
+    if (engine == nullptr) return false;
+    SynthParamInfo oscAInfo{};
+    SynthParamInfo oscBInfo{};
+    const bool selectorRange = synth_param_info(0, &oscAInfo) == 0 &&
+        synth_param_info(17, &oscBInfo) == 0 && oscAInfo.maximum == 4.0f &&
+        oscBInfo.maximum == 4.0f;
+    const bool safeDefault =
+        engine->wavetable.frameCount[synth::kCustomWavetableSlot] == 1u;
+
+    std::vector<float> frames(synth::kTableSize * 2u);
+    for (uint32_t i = 0; i < synth::kTableSize; ++i) {
+        const double phase = static_cast<double>(i) /
+                             static_cast<double>(synth::kTableSize);
+        frames[i] = static_cast<float>(0.20 + 0.35 * std::sin(2.0 * synth::kPi * phase));
+        frames[synth::kTableSize + i] =
+            static_cast<float>(-0.15 + 0.42 * (2.0 * phase - 1.0));
+    }
+    const int loaded = synth_load_wavetable(engine, synth::kCustomWavetableSlot,
+                                             frames.data(), 2u);
+    bool finite = loaded == 0;
+    double peak = 0.0;
+    double differencePower = 0.0;
+    for (uint32_t frame = 0; frame < 2u; ++frame)
+        for (uint32_t mip = 0; mip < synth::kMipLevels; ++mip)
+            for (uint32_t i = 0; i < synth::kTableSize; ++i) {
+                const double value = engine->wavetable.samples[
+                    synth::kCustomWavetableSlot][frame][mip][i];
+                finite = finite && std::isfinite(value);
+                peak = std::max(peak, std::fabs(value));
+            }
+    for (uint32_t i = 0; i < synth::kTableSize; ++i) {
+        const double difference = engine->wavetable.samples[
+            synth::kCustomWavetableSlot][1][0][i] -
+            engine->wavetable.samples[0][0][0][i];
+        differencePower += difference * difference;
+    }
+    const uint32_t loadedFrameCount =
+        engine->wavetable.frameCount[synth::kCustomWavetableSlot];
+    const float preservedSample =
+        engine->wavetable.samples[synth::kCustomWavetableSlot][1][0][137];
+
+    std::vector<float> invalid = frames;
+    invalid[synth::kTableSize + 12u] = std::numeric_limits<float>::quiet_NaN();
+    const int invalidResult = synth_load_wavetable(
+        engine, synth::kCustomWavetableSlot, invalid.data(), 2u);
+    std::vector<float> silent(synth::kTableSize, 0.25f);
+    const int silentResult = synth_load_wavetable(
+        engine, synth::kCustomWavetableSlot, silent.data(), 1u);
+    const bool rejectedWithoutMutation = invalidResult == -2 && silentResult == -3 &&
+        engine->wavetable.frameCount[synth::kCustomWavetableSlot] == loadedFrameCount &&
+        engine->wavetable.samples[synth::kCustomWavetableSlot][1][0][137] ==
+            preservedSample;
+    const double differenceRms = std::sqrt(
+        differencePower / static_cast<double>(synth::kTableSize));
+    const bool ok = selectorRange && safeDefault && loaded == 0 &&
+        loadedFrameCount == 2u && finite && peak <= 0.95001 &&
+        differenceRms >= 0.25 && rejectedWithoutMutation;
+    std::printf(
+        "%s 72 custom wavetable loading: slot=4 frames=%u peak=%.6f diff_rms=%.6f invalid=%d silent=%d preserved=%d\n",
+        ok ? "PASS" : "FAIL", loadedFrameCount, peak, differenceRms,
+        invalidResult, silentResult, rejectedWithoutMutation);
     return ok;
 }
 
@@ -3167,6 +3234,7 @@ int main() {
     passed += test_shared_insert_fx();
     passed += test_insert_fx_block_and_reset();
     passed += test_insert_fx_performance();
-    std::printf("SUMMARY passed=%u failed=%u total=71\n", passed, 71u - passed);
-    return passed == 71 ? 0 : 1;
+    passed += test_custom_wavetable_loading();
+    std::printf("SUMMARY passed=%u failed=%u total=72\n", passed, 72u - passed);
+    return passed == 72 ? 0 : 1;
 }

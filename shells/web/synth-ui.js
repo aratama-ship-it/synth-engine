@@ -8,8 +8,9 @@ import { MATCH_TARGET_RMS_DBFS, candidateRenderPlan, compareSoundAnalyses, level
 import { suggestAmpEnvelope } from "./envelope-match.js";
 import { estimateFilterCutoff, planFilterCutoffProbe } from "./filter-match.js";
 import { createNoteRegistry } from "./note-registry.js";
+import { parseWavetableWav } from "./wavetable-import.js";
 
-const paths = { wasm: "../../build/synth_engine.wasm?m4n=1", presets: "../../presets/" };
+const paths = { wasm: "../../build/synth_engine.wasm?m4r=1", presets: "../../presets/" };
 const presets = Object.freeze({
   epiano: { label:"EPiano", file:"rsk_epiano.txt", description:"やわらかい電気鍵盤", space:{ reverbDecay:1.8 } },
   saw: { label:"Saw", file:"rsk_saw.txt", description:"ユニゾンのある鋸歯波", space:{ reverbDecay:1.6 } },
@@ -23,7 +24,8 @@ const presets = Object.freeze({
   airKeys: { label:"Air Keys", file:"studio_air_keys.txt", description:"空気感を残す鍵盤音", space:{ delayOn:false, delayMix:.08, delayTime:.36, reverbOn:true, reverbMix:.3, reverbMaterial:"warm", reverbDecay:2, reverbHighCut:7200 } },
 });
 const presetCategories = Object.freeze({ epiano:"Keys", saw:"Lead", pluck:"Pluck", bell:"Bell", widePad:"Pad", warmBass:"Bass", glassBell:"Bell", brightPluck:"Pluck", motionLead:"Lead", airKeys:"Keys" });
-const wavetableNames = Object.freeze(["Basic Shapes", "Analog Sweep", "Digital Edge", "Hollow Formant"]);
+const CUSTOM_WAVETABLE_SLOT = 4;
+const wavetableNames = Object.freeze(["Basic Shapes", "Analog Sweep", "Digital Edge", "Hollow Formant", "Custom · Session"]);
 const groups = Object.freeze({
   "global-controls": [{ id: 7, label: "MASTER" }],
   "voice-controls": [{ id: 8, label: "VOICES" }],
@@ -62,6 +64,7 @@ let synth;
 let audioReady;
 let outputGate;
 let spaceEffects;
+const customWavetable = { frames:null, frameCount:0, sampleRate:0, name:"" };
 const spaceValues = { ...SPACE_DEFAULTS };
 const fxValues = structuredClone(FX_DEFAULTS);
 const storageKeys = Object.freeze({ autosave:"synth-engine.studio.autosave.v1", patches:"synth-engine.studio.user-patches.v1" });
@@ -134,7 +137,19 @@ function updateControl(id) {
   updateVisuals(id);
   if ([9, 15, 20, 26, 76, 77, 78].includes(id)) syncQualityLab();
 }
-function setValue(id, value) { const parameter = parameterInfo.get(id); const numeric = Number(value); if (!parameter || !Number.isFinite(numeric)) return false; const next = Math.min(parameter.max, Math.max(parameter.min, numeric)); values.set(id, next); updateControl(id); synth?.setParam(id, next); markMatchCoreChanged(id); schedulePatchCapture(); return true; }
+function setValue(id, value) {
+  const parameter = parameterInfo.get(id); const numeric = Number(value);
+  if (!parameter || !Number.isFinite(numeric)) return false;
+  const next = Math.min(parameter.max, Math.max(parameter.min, numeric));
+  if ([0, 17].includes(id) && Math.round(next) === CUSTOM_WAVETABLE_SLOT && !customWavetable.frames) {
+    updateControl(id);
+    elements["wavetable-import-state"].textContent = "LOAD WAV FIRST";
+    setStatus("CUSTOM WTは未読込です。先にLOAD WAVで2048サンプル単位のWAVを選んでください。", true);
+    return false;
+  }
+  values.set(id, next); updateControl(id); synth?.setParam(id, next);
+  markMatchCoreChanged(id); schedulePatchCapture(); return true;
+}
 function registerControl(id, control) { if (!controlsById.has(id)) controlsById.set(id, []); controlsById.get(id).push(control); }
 
 function setQualityPressed(button, pressed) {
@@ -306,6 +321,17 @@ function harmonicSample(phase, coefficient, limit = 48) {
 }
 function rawWavetableFrameSample(slot, frame, phase) {
   const wrapped = phase - Math.floor(phase);
+  if (slot === CUSTOM_WAVETABLE_SLOT) {
+    if (!customWavetable.frames) return Math.sin(wrapped * Math.PI * 2);
+    const safeFrame = Math.min(customWavetable.frameCount - 1, Math.max(0, frame));
+    const position = wrapped * 2048;
+    const first = Math.floor(position) & 2047;
+    const second = (first + 1) & 2047;
+    const mix = position - Math.floor(position);
+    const offset = safeFrame * 2048;
+    return customWavetable.frames[offset + first] * (1 - mix) +
+      customWavetable.frames[offset + second] * mix;
+  }
   if (slot === 0) return waveformSample(frame, wrapped);
   if (frame === 0) return waveformSample(slot, wrapped);
   if (slot === 1 && frame === 1) return harmonicSample(wrapped, (harmonic) => (-2 / (Math.PI * harmonic)) * (10 / (10 + harmonic)));
@@ -349,9 +375,12 @@ function wavetableFrameSample(slot, frame, phase) {
   return rawWavetableFrameSample(slot, frame, phase) * visualFrameGain.get(key);
 }
 function oscillatorSample(slot, position, phase) {
-  const framePosition = Math.min(1, Math.max(0, position)) * 3;
+  const frameCount = slot === CUSTOM_WAVETABLE_SLOT && customWavetable.frames
+    ? customWavetable.frameCount : 4;
+  const lastFrame = frameCount - 1;
+  const framePosition = Math.min(1, Math.max(0, position)) * lastFrame;
   const first = Math.floor(framePosition);
-  const second = Math.min(3, first + 1);
+  const second = Math.min(lastFrame, first + 1);
   const mix = framePosition - first;
   return wavetableFrameSample(slot, first, phase) * (1 - mix) + wavetableFrameSample(slot, second, phase) * mix;
 }
@@ -1007,6 +1036,12 @@ function applyPatch(candidate, { resetHistory = false, message } = {}) {
     syncPresetIdentity(patch.name, patch.category);
     restoreDefaults();
     for (const [id, value] of patch.core) { const parameter = parameterInfo.get(id); if (parameter) values.set(id, Math.min(parameter.max, Math.max(parameter.min, value))); }
+    let customFallback = false;
+    for (const id of [0, 17]) {
+      if (Math.round(values.get(id)) === CUSTOM_WAVETABLE_SLOT && !customWavetable.frames) {
+        values.set(id, 0); customFallback = true;
+      }
+    }
     [...values.keys()].forEach(updateControl);
     Object.assign(spaceValues, SPACE_DEFAULTS, patch.space);
     for (const [id, range] of Object.entries(effectRanges)) spaceValues[id] = Math.min(range[1], Math.max(range[0], spaceValues[id]));
@@ -1015,7 +1050,9 @@ function applyPatch(candidate, { resetHistory = false, message } = {}) {
     if (synth) { synth.reset(1); [...values.entries()].forEach(([id, value]) => synth.setParam(id, value)); }
     markMatchCoreChanged();
     if (resetHistory) patchHistory?.reset(capturePatch(patch.name, patch.category));
-    saveAutosave(capturePatch(patch.name, patch.category)); updateHistoryButtons(); setStatus(message ?? `${patch.name}を復元しました。音源・変調・FX・順序を適用済みです。`);
+    saveAutosave(capturePatch(patch.name, patch.category)); updateHistoryButtons();
+    const restored = message ?? `${patch.name}を復元しました。音源・変調・FX・順序を適用済みです。`;
+    setStatus(customFallback ? `${restored} CUSTOM WTの音声は保存されないためBasic Shapesへ戻しました。` : restored);
   } finally { applyingPatch = false; }
 }
 
@@ -1142,6 +1179,35 @@ function panicAudio({ broadcast = false } = {}) {
   finally { closeOutputGate(); }
   if (broadcast) audioSessionChannel?.postMessage({ type:"panic", owner:audioSessionId });
 }
+function installWavetableImport() {
+  const input = elements["wavetable-file"];
+  elements["load-wavetable"].addEventListener("click", () => input.click());
+  input.addEventListener("change", async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const parsed = parseWavetableWav(await file.arrayBuffer());
+      elements["wavetable-import-state"].textContent = "LOADING · OUTPUT MUTED";
+      stopAllNotes(); closeOutputGate();
+      const node = await ensureAudio(() => false);
+      closeOutputGate(); node.reset(0);
+      const loaded = await node.loadWavetable(CUSTOM_WAVETABLE_SLOT, parsed.frames);
+      customWavetable.frames = parsed.frames.slice();
+      customWavetable.frameCount = parsed.frameCount;
+      customWavetable.sampleRate = parsed.sampleRate;
+      customWavetable.name = file.name;
+      visualFrameGain.clear();
+      renderWaveform("wave-a", 0, 1); renderWaveform("wave-b", 17, 18);
+      elements["wavetable-import-state"].textContent =
+        `READY · ${parsed.frameCount}F · ${parsed.sampleRate.toLocaleString()} Hz`;
+      setStatus(`${file.name}をCUSTOM WTへ読み込みました（${parsed.frameCount}フレーム、${loaded.loadMs.toFixed(1)} ms）。出力はミュート中です。WAVEでCustom · Sessionを選び、鍵盤を押すと再開します。`);
+    } catch (error) {
+      elements["wavetable-import-state"].textContent = customWavetable.frames
+        ? `READY · PREVIOUS KEPT` : "ERROR · NOT LOADED";
+      setStatus(`CUSTOM WTを読み込めません: ${error.message}。${customWavetable.frames ? "直前の波形を保持しました。" : "既定波形を保持しました。"}`, true);
+    } finally { input.value = ""; }
+  });
+}
 function installAudioSession() {
   audioSessionChannel?.addEventListener("message", (event) => {
     const message = event.data;
@@ -1205,7 +1271,7 @@ elements["export-patch"].addEventListener("click", exportCurrentPatch); elements
 
 try {
   wasmBytes = await fetchChecked(paths.wasm); const parameters = await getParams(wasmBytes); parameters.forEach((parameter) => { parameterInfo.set(parameter.id, parameter); values.set(parameter.id, parameter.default); });
-  const savedAutosave = localStorage.getItem(storageKeys.autosave); loadUserPatches(); renderPresets(); renderControls(); renderPiano(); installTabs(); installEditorBanks(); installModDialog(); installQualityLab(); installSoundMatch();
+  const savedAutosave = localStorage.getItem(storageKeys.autosave); loadUserPatches(); renderPresets(); renderControls(); renderPiano(); installTabs(); installEditorBanks(); installModDialog(); installQualityLab(); installWavetableImport(); installSoundMatch();
   const requestedTab = urlParams.get("tab");
   if (tabOrder.includes(requestedTab)) selectTab(requestedTab);
   installAudioSession(); installKeyboard(); await loadPreset(elements.preset.value); patchHistory = createPatchHistory(capturePatch());

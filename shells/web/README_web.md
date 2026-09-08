@@ -40,7 +40,7 @@ FXは`OSC / FILTER / AMP → MASTER → 共有C++ INSERTS → DRY + Web DELAY + 
 
 MATCHの候補描画後にcoreパラメータ、preset、INIT、Undo / Redo、JSON importでcore値が変わると、前の候補を比較不能にして再描画を求める。AMP ENV仮説とFilter Cutoff仮説の適用も同じ扱いで、変更は既存Undoから一手で戻せる。A/B下の包絡相関、pitch cents差、attack差、brightness差は次に触る場所を絞る補助値であり、音色の一致や完成判定ではない。仕様境界は`SPEC_M4c.md`、`SPEC_M4d.md`、`SPEC_M4e.md`。
 
-Studio UIの保存・操作面とDelay / ReverbはWeb殻に置き、共有InsertはM4nからコア／AUにも公開する。M4aではコアの内蔵4 wavetableを各4フレームへ拡張し、C ABIとパラメータ数を維持したままengine versionを9へ更新した。M4fではmip境界をalias-safeな100 cent crossfadeへ変更し、同じ境界を通るWeb / nativeコアをengine version 10へ更新した。M4gではMorph／FM／Level系8操作の5 ms平滑化と、unisonのdetune／pan配置分離をコアへ追加しengine versionを11へ更新した。M4hではBalanced位相、Natural Widthカーブ、高域FM Guardを比較用の3パラメータとして追加し、engine versionを12へ更新した。M4iでは日常のOSC操作を先頭へ戻し、`QUALITY LAB`は通常画面から外して`?quality=1`の明示的な検証URLだけに残した。M4jではAudioContext再開直後のWeb FX初期値と入力解放を安全化し、M4kではReverb IRの過大ゲインと自動復元時のプリセット表示ずれを修正した。M4lではMatrix専用の独立LFO 2を追加し、既存IDを維持したまま83パラメータ・engine version 13へ更新した。M4mではMacro 3 / 4と独立Mod EGを追加して90パラメータ・engine version 14へ、M4nでは4 Insertと順序を共通コアへ移して113パラメータ・engine version 15へ更新した。比較時は従来どおりユニゾンとFMを独立操作でき、Studio全体の44px操作面積とコンパクト密度も維持する。設計メモと数値トークンは`design/SYNTH_UI_DESIGN.md`、`design/SYNTH_UI_TOKEN_SHEET.md`に置く。2026-09-07の比較音と検証台帳は`design/overnight-runs/2026-09-07-serum-until-08/`に置く。
+Studio UIの保存・操作面とDelay / ReverbはWeb殻に置き、共有InsertはM4nからコア／AUにも公開する。M4aではコアの内蔵4 wavetableを各4フレームへ拡張し、C ABIとパラメータ数を維持したままengine versionを9へ更新した。M4fではmip境界をalias-safeな100 cent crossfadeへ変更し、同じ境界を通るWeb / nativeコアをengine version 10へ更新した。M4gではMorph／FM／Level系8操作の5 ms平滑化と、unisonのdetune／pan配置分離をコアへ追加しengine versionを11へ更新した。M4hではBalanced位相、Natural Widthカーブ、高域FM Guardを比較用の3パラメータとして追加し、engine versionを12へ更新した。M4iでは日常のOSC操作を先頭へ戻し、`QUALITY LAB`は通常画面から外して`?quality=1`の明示的な検証URLだけに残した。M4jではAudioContext再開直後のWeb FX初期値と入力解放を安全化し、M4kではReverb IRの過大ゲインと自動復元時のプリセット表示ずれを修正した。M4lではMatrix専用の独立LFO 2を追加し、既存IDを維持したまま83パラメータ・engine version 13へ更新した。M4mではMacro 3 / 4と独立Mod EGを追加して90パラメータ・engine version 14へ、M4nでは4 Insertと順序を共通コアへ移して113パラメータ・engine version 15へ更新した。M4rではslot 4をセッション用Customへ拡張し、厳密なローカルWAV読込と非破壊検証を追加してengine version 16へ更新した。比較時は従来どおりユニゾンとFMを独立操作でき、Studio全体の44px操作面積とコンパクト密度も維持する。設計メモと数値トークンは`design/SYNTH_UI_DESIGN.md`、`design/SYNTH_UI_TOKEN_SHEET.md`に置く。2026-09-07の比較音と検証台帳は`design/overnight-runs/2026-09-07-serum-until-08/`に置く。
 
 ## 確認手順
 
@@ -82,9 +82,9 @@ Worklet内部カウンタへフォールバックする。
 node --test shells/web/tests/
 ```
 
-発音・DSP・Web Audioに触れる変更では、先に現在のWASMをビルドしてから63件のWebテストを実行する。
+発音・DSP・Web Audioに触れる変更では、先に現在のWASMをビルドしてから65件のWebテストを実行する。
 `audio-safety.test.mjs`はAudioWorkletProcessorへ実WASMを読み込み、出力をAudioContextや物理デバイスへ接続せず、
-48 kHz／128 framesで初回発音、Morph変更中の発音継続、note-off後の無音、voice resetによるpanic後の無音、
+48 kHz／128 framesでCustom WT読込、初回発音、Morph変更中の発音継続、note-off後の無音、voice resetによるpanic後の無音、
 全サンプルの有限性と低出力プリセット時のpeak上限0.25を検査する。WASMが無いローカル実行ではこの1件をskipするが、
 GitHub Actionsは`make wasm`の成功後に同じテストを実行するためskipしない。
 
@@ -120,8 +120,8 @@ node tools/analyze-sound.mjs design/verify/ref/rsk_epiano.wav
 
 | 項目 | 値 | 環境・備考 |
 |---|---:|---|
-| WASM raw | 71,784 B | `wc -c build/synth_engine.wasm`、2026-09-07 M4n実測 |
-| WASM gzip | 20,286 B | gzip圧縮、2026-09-07 M4n実測 |
+| WASM raw | 75,383 B | `wc -c build/synth_engine.wasm`、2026-09-08 M4r実測 |
+| WASM gzip | 21,094 B | gzip圧縮、2026-09-08 M4r実測 |
 | batch `ready` | ブラウザ確認後に記録 | Worklet 内 `WebAssembly.instantiate` 開始から batch 適用可能になるまで |
 | `process()` average | ブラウザ確認後に記録 | `performance.now()`、直近最大1000ブロック |
 | `process()` p99 | ブラウザ確認後に記録 | 同上 |

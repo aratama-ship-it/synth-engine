@@ -4,13 +4,15 @@ Run with a Python environment containing Playwright and a running tools/serve.mj
 import argparse
 import importlib.util
 import json
+import math
+import struct
 from datetime import datetime
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--url", default="http://127.0.0.1:8963/shells/web/synth.html?m4o=1")
-parser.add_argument("--out", type=Path, default=Path("design/verify/m4o-ui-20260907"))
+parser.add_argument("--url", default="http://127.0.0.1:8963/shells/web/synth.html?m4r=1")
+parser.add_argument("--out", type=Path, default=Path("design/verify/m4r-custom-wavetable-20260908"))
 parser.add_argument("--design-lint", type=Path)
 args = parser.parse_args()
 args.out.mkdir(parents=True, exist_ok=True)
@@ -20,6 +22,16 @@ checks = []
 def passed(name):
     checks.append(name)
     print(f"PASS {name}", flush=True)
+
+
+def wavetable_wav():
+    samples = [round(math.sin(index / 2048 * math.tau) * 0.75 * 32767) for index in range(2048)]
+    payload = struct.pack("<" + "h" * len(samples), *samples)
+    return (
+        b"RIFF" + struct.pack("<I", 36 + len(payload)) + b"WAVE"
+        + b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, 48000, 96000, 2, 16)
+        + b"data" + struct.pack("<I", len(payload)) + payload
+    )
 
 
 with sync_playwright() as p:
@@ -34,6 +46,21 @@ with sync_playwright() as p:
     expect(page.locator("#quality-lab")).to_be_hidden()
     expect(page.locator("#patch-tools")).to_be_hidden()
     passed("Ready, wave picker, secondary tools initially hidden")
+
+    expect(page.locator("#wavetable-import-state")).to_have_text("NOT LOADED")
+    page.locator("#wave-picker-a select").select_option("4")
+    expect(page.locator("#wave-picker-a select")).to_have_value("0")
+    expect(page.locator("#wavetable-import-state")).to_have_text("LOAD WAV FIRST")
+    page.locator("#wavetable-file").set_input_files({
+        "name": "m4r-test.wav", "mimeType": "audio/wav", "buffer": wavetable_wav()
+    })
+    expect(page.locator("#wavetable-import-state")).to_contain_text("READY", timeout=10000)
+    expect(page.locator("#status")).to_contain_text("出力はミュート中")
+    page.locator("#wave-picker-a select").select_option("4")
+    expect(page.locator("#wave-picker-a select")).to_have_value("4")
+    page.screenshot(path=str(args.out / "custom-wavetable.png"))
+    page.locator("#wave-picker-a select").select_option("0")
+    passed("Custom WAV import is guarded, acknowledged, session-only, and remains muted")
 
     def patch():
         return page.evaluate("JSON.parse(localStorage.getItem('synth-engine.studio.autosave.v1'))")
@@ -164,7 +191,7 @@ with sync_playwright() as p:
         lint = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(lint)
         for tab in ["osc", "fx", "matrix", "match"]:
-            target = {"name": f"SynthEngine M4o {tab.upper()}", "url": args.url + f"&tab={tab}", "note": "UI refinement; fresh context, no listening claim"}
+            target = {"name": f"SynthEngine M4r {tab.upper()}", "url": args.url + f"&tab={tab}", "note": "Custom wavetable UI; fresh context, no listening claim"}
             out = args.out / tab
             results = lint.run_target(browser, target, out, [(390, 844), (1440, 900)])
             lint.write_report(target, results, out)

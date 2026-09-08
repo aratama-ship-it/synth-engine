@@ -98,14 +98,20 @@ test("live output starts behind a safety gate and lost input focus kills held no
   assert.match(source, /document\.addEventListener\("visibilitychange"/);
 });
 
-test("each oscillator exposes four named four-frame wavetable regions", async () => {
+test("each oscillator exposes four built-ins plus one session-only custom wavetable", async () => {
   const html = await readFile(new URL("synth.html", root), "utf8");
   const source = await readFile(new URL("synth-ui.js", root), "utf8");
   for (const name of ["Basic Shapes", "Analog Sweep", "Digital Edge", "Hollow Formant"])
     assert.match(source, new RegExp(name));
-  assert.match(source, /framePosition[^;]*\* 3/);
+  assert.match(source, /Custom · Session/);
+  assert.match(source, /CUSTOM_WAVETABLE_SLOT = 4/);
+  assert.match(source, /customWavetable\.frameCount/);
   assert.match(source, /wavetableFrameSample\(slot, first/);
-  assert.match(html, /4 WT × 4 frames/);
+  assert.match(html, /4 BUILTIN WT \+ 1 SESSION/);
+  assert.match(html, /id="load-wavetable"/);
+  assert.match(html, /LOCAL WAV · SESSION ONLY/);
+  assert.match(source, /parseWavetableWav/);
+  assert.match(source, /closeOutputGate\(\); node\.reset\(0\)/);
 });
 
 test("named patch save uses an in-page confirmation flow", async () => {

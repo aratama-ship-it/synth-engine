@@ -7,7 +7,9 @@ namespace synth {
 
 constexpr uint32_t kTableSize = 2048;
 constexpr uint32_t kMipLevels = 10;
-constexpr uint32_t kWavetableSlots = 4;
+constexpr uint32_t kBuiltinWavetableSlots = 4;
+constexpr uint32_t kWavetableSlots = 5;
+constexpr uint32_t kCustomWavetableSlot = 4;
 constexpr uint32_t kMaxWavetableFrames = 4;
 
 struct WavetableBank {

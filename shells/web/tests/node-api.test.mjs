@@ -17,15 +17,17 @@ test("node API exposes two stereo outputs and unique NoteHandles for same-pitch 
   const originalInstantiate = WebAssembly.instantiate;
   const OriginalAudioWorkletNode = globalThis.AudioWorkletNode;
   const messages = [];
+  const transfers = [];
   const connections = [];
   let nodeOptions;
+  let messageListener;
   class FakeAudioWorkletNode {
     constructor(_context, _name, options) {
       nodeOptions = options;
       this.port = {
-        addEventListener() {},
+        addEventListener(type, listener) { if (type === "message") messageListener = listener; },
         start() {},
-        postMessage(message) { messages.push(message); },
+        postMessage(message, transfer = []) { messages.push(message); transfers.push(transfer); },
       };
     }
 
@@ -83,6 +85,19 @@ test("node API exposes two stereo outputs and unique NoteHandles for same-pitch 
         events: [{ frame: 1300, kind: 2, id: 1, a: 0, b: 0 }],
       },
     ]);
+
+    const custom = new Float32Array(2048);
+    for (let index = 0; index < custom.length; index += 1) custom[index] = Math.sin(index / 2048 * Math.PI * 2);
+    const loading = synth.loadWavetable(4, custom);
+    const loadMessage = messages.at(-1);
+    assert.equal(loadMessage.type, "wavetable");
+    assert.equal(loadMessage.slot, 4);
+    assert.equal(loadMessage.frameCount, 1);
+    assert.equal(loadMessage.frames.length, 2048);
+    assert.deepEqual(transfers.at(-1), [loadMessage.frames.buffer]);
+    messageListener({ data:{ type:"wavetableLoaded", requestId:loadMessage.requestId, result:0, loadMs:3.5 } });
+    assert.equal((await loading).loadMs, 3.5);
+    await assert.rejects(() => synth.loadWavetable(4, new Float32Array(1024)), /1-4 frames/);
 
     const otherSynth = await createSynthNode(context, new ArrayBuffer(0));
     const foreignHandle = otherSynth.noteOn(60, 0.5, 1400);

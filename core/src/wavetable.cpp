@@ -120,13 +120,13 @@ void match_frame_peak(WavetableBank* bank, uint32_t slot, uint32_t frame,
 }  // namespace
 
 void initialize_builtin_wavetables(WavetableBank* bank) {
-    static constexpr BuiltinShape firstShapes[kWavetableSlots] = {
+    static constexpr BuiltinShape firstShapes[kBuiltinWavetableSlots] = {
         kSine, kSaw, kSquare, kTriangle
     };
     static constexpr BuiltinShape basicShapes[kMaxWavetableFrames] = {
         kSine, kTriangle, kSaw, kSquare
     };
-    for (uint32_t slot = 0; slot < kWavetableSlots; ++slot) {
+    for (uint32_t slot = 0; slot < kBuiltinWavetableSlots; ++slot) {
         bank->frameCount[slot] = kMaxWavetableFrames;
         const uint32_t legacyFrames = slot == 0u ? kMaxWavetableFrames : 1u;
         for (uint32_t frame = 0; frame < legacyFrames; ++frame)
@@ -144,7 +144,7 @@ void initialize_builtin_wavetables(WavetableBank* bank) {
     for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
         const uint32_t limit = harmonic_limit(mip);
         float* destinations[9];
-        for (uint32_t slot = 1u; slot < kWavetableSlots; ++slot)
+        for (uint32_t slot = 1u; slot < kBuiltinWavetableSlots; ++slot)
             for (uint32_t frame = 1u; frame < kMaxWavetableFrames; ++frame) {
                 const uint32_t profile = (slot - 1u) * 3u + (frame - 1u);
                 destinations[profile] = bank->samples[slot][frame][mip];
@@ -153,7 +153,7 @@ void initialize_builtin_wavetables(WavetableBank* bank) {
         for (uint32_t h = 1; h <= limit; ++h) {
             double sine[9]{};
             double cosine[9]{};
-            for (uint32_t slot = 1u; slot < kWavetableSlots; ++slot)
+            for (uint32_t slot = 1u; slot < kBuiltinWavetableSlots; ++slot)
                 for (uint32_t frame = 1u; frame < kMaxWavetableFrames; ++frame) {
                     const uint32_t profile = (slot - 1u) * 3u + (frame - 1u);
                     profile_coefficients(slot, frame, h,
@@ -171,31 +171,63 @@ void initialize_builtin_wavetables(WavetableBank* bank) {
             }
         }
     }
-    for (uint32_t slot = 1u; slot < kWavetableSlots; ++slot) {
+    for (uint32_t slot = 1u; slot < kBuiltinWavetableSlots; ++slot) {
         const double targetPeak = frame_peak(bank, slot, 0u);
         for (uint32_t frame = 1u; frame < kMaxWavetableFrames; ++frame)
             match_frame_peak(bank, slot, frame, targetPeak);
     }
+
+    // A safe deterministic fallback lives in the session-only custom slot until the
+    // host explicitly replaces it. Copy every frame so the whole state is initialized,
+    // while exposing one frame to readers until a custom table is loaded.
+    for (uint32_t frame = 0; frame < kMaxWavetableFrames; ++frame)
+        for (uint32_t mip = 0; mip < kMipLevels; ++mip)
+            for (uint32_t i = 0; i < kTableSize; ++i)
+                bank->samples[kCustomWavetableSlot][frame][mip][i] =
+                    bank->samples[0][0][mip][i];
+    bank->frameCount[kCustomWavetableSlot] = 1u;
 }
 
 int load_wavetable(WavetableBank* bank, uint32_t slot, const float* frames, uint32_t frameCount) {
     if (bank == 0 || frames == 0 || slot >= kWavetableSlots || frameCount == 0 ||
         frameCount > kMaxWavetableFrames) return -1;
+    double frameDc[kMaxWavetableFrames]{};
+    double framePeak[kMaxWavetableFrames]{};
+    for (uint32_t frame = 0; frame < frameCount; ++frame) {
+        const float* input = frames + frame * kTableSize;
+        double dc = 0.0;
+        for (uint32_t i = 0; i < kTableSize; ++i) {
+            const double value = static_cast<double>(input[i]);
+            // This comparison rejects NaN as well as infinities and unreasonable input.
+            if (!(value >= -1000000.0 && value <= 1000000.0)) return -2;
+            dc += value;
+        }
+        dc /= static_cast<double>(kTableSize);
+        double peak = 0.0;
+        for (uint32_t i = 0; i < kTableSize; ++i) {
+            const double value = absd(static_cast<double>(input[i]) - dc);
+            if (value > peak) peak = value;
+        }
+        if (peak <= 1.0e-8) return -3;
+        frameDc[frame] = dc;
+        framePeak[frame] = peak;
+    }
+
     double cosine[1025];
     double sine[1025];
     for (uint32_t frame = 0; frame < frameCount; ++frame) {
         const float* input = frames + frame * kTableSize;
-        double dc = 0.0;
-        for (uint32_t i = 0; i < kTableSize; ++i) dc += static_cast<double>(input[i]);
-        dc /= static_cast<double>(kTableSize);
+        const double gain = 0.95 / framePeak[frame];
         for (uint32_t h = 1; h <= 1024; ++h) {
             double re = 0.0;
             double im = 0.0;
             for (uint32_t i = 0; i < kTableSize; ++i) {
                 const double angle = kTwoPi * static_cast<double>(h * i) /
                                      static_cast<double>(kTableSize);
-                re += static_cast<double>(input[i]) * fast_cos(angle);
-                im += static_cast<double>(input[i]) * fast_sin(angle);
+                const double normalized =
+                    (static_cast<double>(input[i]) - frameDc[frame]) * gain;
+                re += normalized * fast_cos(angle);
+                im += normalized * fast_sin(angle);
             }
             cosine[h] = 2.0 * re / static_cast<double>(kTableSize);
             sine[h] = 2.0 * im / static_cast<double>(kTableSize);
@@ -203,7 +235,7 @@ int load_wavetable(WavetableBank* bank, uint32_t slot, const float* frames, uint
         for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
             const uint32_t limit = harmonic_limit(mip);
             for (uint32_t i = 0; i < kTableSize; ++i) {
-                double output = dc;
+                double output = 0.0;
                 for (uint32_t h = 1; h <= limit; ++h) {
                     const double angle = kTwoPi * static_cast<double>(h * i) /
                                          static_cast<double>(kTableSize);
@@ -211,6 +243,20 @@ int load_wavetable(WavetableBank* bank, uint32_t slot, const float* frames, uint
                 }
                 bank->samples[slot][frame][mip][i] = static_cast<float>(output);
             }
+        }
+
+        double outputPeak = 0.0;
+        for (uint32_t mip = 0; mip < kMipLevels; ++mip)
+            for (uint32_t i = 0; i < kTableSize; ++i) {
+                const double value = absd(static_cast<double>(
+                    bank->samples[slot][frame][mip][i]));
+                if (value > outputPeak) outputPeak = value;
+            }
+        if (outputPeak > 0.95) {
+            const float outputGain = static_cast<float>(0.95 / outputPeak);
+            for (uint32_t mip = 0; mip < kMipLevels; ++mip)
+                for (uint32_t i = 0; i < kTableSize; ++i)
+                    bank->samples[slot][frame][mip][i] *= outputGain;
         }
     }
     bank->frameCount[slot] = frameCount;

@@ -74,6 +74,12 @@ main { width:min(calc(100% - var(--space-6)),var(--content-width)); margin:auto;
 .work-panel { animation:panel-in var(--duration-standard) var(--ease-standard); }
 @keyframes panel-in { from { opacity:.72; transform:translateY(2px); } to { opacity:1; transform:none; } }
 .oscillator-pair { display:grid; grid-template-columns:1fr 1fr; gap:var(--gutter); }
+.wavetable-import { display:grid; grid-template-columns:auto minmax(260px,1fr) auto auto; align-items:center; gap:8px; min-height:56px; margin-bottom:var(--gutter); padding:8px 12px; border:var(--line) solid var(--color-line); border-left:3px solid var(--color-osc); background:var(--color-panel); }
+.wavetable-import-heading { display:flex; align-items:baseline; gap:8px; }
+.wavetable-import-heading h2 { margin:0; font:700 var(--fs-section)/1.5 var(--font-value); letter-spacing:.08em; white-space:nowrap; }
+.wavetable-import>p { margin:0; color:var(--color-text-sub); font-size:var(--fs-small); }
+.wavetable-import .button { min-height:44px; }
+.wavetable-import strong { min-width:180px; color:var(--color-osc); font:700 var(--fs-small)/1.5 var(--font-value); text-align:right; }
 .tone-row { display:grid; grid-template-columns:1.05fr .95fr; gap:var(--gutter); margin-top:var(--gutter); }
 .modulator-row { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:var(--gutter); margin-top:var(--gutter); }
 .tone-row .module,.modulator-row .module { grid-column:auto; }
@@ -267,6 +273,9 @@ main { width:min(calc(100% - var(--space-6)),var(--content-width)); margin:auto;
   .work-tabs { top:0; }
   .work-tab { min-width:0; flex:1; padding-inline:var(--space-3); }
   .oscillator-pair,.tone-row,.modulator-row,.time-effects { grid-template-columns:1fr; }
+  .wavetable-import { grid-template-columns:1fr; align-items:start; }
+  .wavetable-import .button { width:100%; }
+  .wavetable-import strong { min-width:0; text-align:left; }
   .modulator-row .module-mod { grid-column:auto; }
   .oscillator-controls { grid-template-columns:repeat(3,minmax(64px,1fr)); }
   .overview { align-items:flex-start; }

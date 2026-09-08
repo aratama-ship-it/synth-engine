@@ -66,10 +66,21 @@ test("silent safety gate: parameter change, note release, and panic remain bound
     processor.port.postMessage = (message) => messages.push(message);
     await waitUntilReady(processor, messages);
 
+    const customFrame = new Float32Array(2048);
+    for (let index = 0; index < customFrame.length; index += 1) {
+      customFrame[index] = Math.sin(index / customFrame.length * Math.PI * 2) * 0.95;
+    }
+    processor.receive({
+      type: "wavetable", requestId: 1, slot: 4, frameCount: 1, frames: customFrame,
+    });
+    const loaded = messages.find((message) =>
+      message.type === "wavetableLoaded" && message.requestId === 1);
+    assert.equal(loaded?.result, 0, loaded?.message || "custom wavetable did not acknowledge");
+
     processor.receive({
       type: "preset",
       params: [
-        [0, 0], [1, 0], [2, 0.2],
+        [0, 4], [1, 0], [2, 0.2],
         [3, 0.001], [4, 0.01], [5, 0.8], [6, 0.02], [7, 0.1],
         [9, 1], [19, 0], [29, 0], [32, 0], [35, 0], [75, 0],
         [90, 0], [94, 0], [99, 0], [103, 0],
@@ -135,6 +146,7 @@ test("silent safety gate: parameter change, note release, and panic remain bound
 
     context.diagnostic(JSON.stringify({
       physicalOutput: "disconnected",
+      customWavetable: "loaded in slot 4",
       peakBeforeChange,
       peakAfterChange,
       maximumPeak,

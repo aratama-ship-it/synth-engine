@@ -7,6 +7,8 @@ const EVENT_BYTES = 20;
 const EVENT_CAPACITY = 4096;
 const MAX_BLOCK = 512;
 const VOICE_PARAM_KIND = 5;
+const WAVETABLE_SIZE = 2048;
+const MAX_WAVETABLE_FRAMES = 4;
 
 // AudioWorkletGlobalScope.currentFrame は AudioContext 全体の絶対フレーム。
 // ライブの呼び出し側も同じ時刻系でイベントを送る。Node上の検査では未定義なので、
@@ -158,7 +160,9 @@ export class SynthEngineProcessor extends ProcessorBase {
       this.outRPtr = this.outLPtr + MAX_BLOCK * 4;
       this.sendLPtr = this.outRPtr + MAX_BLOCK * 4;
       this.sendRPtr = this.sendLPtr + MAX_BLOCK * 4;
-      const requiredBytes = this.sendRPtr + MAX_BLOCK * 4;
+      this.wavetablePtr = this.sendRPtr + MAX_BLOCK * 4;
+      const requiredBytes = this.wavetablePtr +
+        WAVETABLE_SIZE * MAX_WAVETABLE_FRAMES * Float32Array.BYTES_PER_ELEMENT;
       if (requiredBytes > this.memory.buffer.byteLength) {
         this.memory.grow(Math.ceil((requiredBytes - this.memory.buffer.byteLength) / 65536));
       }
@@ -235,6 +239,39 @@ export class SynthEngineProcessor extends ProcessorBase {
         if (!Number.isInteger(kind) || (kind !== 0 && kind !== 1)) throw new Error("reset.kind must be 0 or 1");
         this.exports.synth_reset(this.engine, kind, BigInt(message.seed ?? 1));
         this.ring.clear();
+        break;
+      }
+      case "wavetable": {
+        const requestId = Number(message.requestId);
+        const slot = Number(message.slot);
+        const frameCount = Number(message.frameCount);
+        const frames = message.frames;
+        if (!Number.isSafeInteger(requestId) || requestId < 1 ||
+            !Number.isInteger(slot) || slot < 0 ||
+            !Number.isInteger(frameCount) || frameCount < 1 ||
+            frameCount > MAX_WAVETABLE_FRAMES ||
+            !(frames instanceof Float32Array) ||
+            frames.length !== frameCount * WAVETABLE_SIZE) {
+          this.port.postMessage({
+            type: "wavetableLoaded", requestId, result: -1,
+            message: "invalid wavetable message",
+          });
+          break;
+        }
+        const started = nowMs();
+        // Loading can be expensive. Always silence active voices and discard queued
+        // notes before touching the shared bank; the UI also closes its output gate.
+        this.exports.synth_reset(this.engine, 0, 1n);
+        this.ring.clear();
+        new Float32Array(this.memory.buffer, this.wavetablePtr, frames.length).set(frames);
+        const result = this.exports.synth_load_wavetable(
+          this.engine, slot, this.wavetablePtr, frameCount,
+        );
+        this.port.postMessage({
+          type: "wavetableLoaded", requestId, result,
+          frameCount, loadMs: nowMs() - started,
+          message: result === 0 ? "" : `synth_load_wavetable failed: ${result}`,
+        });
         break;
       }
       default:

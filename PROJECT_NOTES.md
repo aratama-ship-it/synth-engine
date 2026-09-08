@@ -341,6 +341,9 @@ C++ CLIレンダラー（プリセット＋イベントJSON → WAV）を基準�
 - **2026-09-08 M4q 無音AudioWorklet安全ゲート追加（GitHub公開版）**。
   発音系の変更を一件ずつ止めて検証するため、`shells/web/tests/audio-safety.test.mjs`を追加した。物理出力やAudioContextへ接続せず、実WASMをSynthEngineProcessorへ読み込んで48 kHz／128 framesでブロック処理する。低出力プリセットで初回発音、Morph変更前後の発音継続、note-off、voice resetによるpanicを順に実行し、全サンプルの有限性、peak 0.25以下、release／panic後1e-7以下を必須にした。実測は変更前peak 0.008005、変更後peak 0.008108、全体最大0.009215、release後0、panic前0.005232、panic後0、NaN／Inf 0。Web 63/63、core 71/71、freestanding PASS。GitHub ActionsはWASMビルド後に同じWebテスト入口を実行する。UI、DSPコア、プリセット、WASM、AU、音色パラメータは変更していない。次の機能変更はこのゲート合格後に一件だけ進める。
 
+- **2026-09-08 M4r session-only Custom Wavetable WAV import（ローカル検証済み）**。
+  内蔵4 wavetableを維持したままslot 4をCustomへ拡張し、WebのOSC A/Bで共有するローカルWAV読込を追加した。入力はPCM 16/24/32-bitまたはfloat 32-bit、mono/stereo、2048 samples × 1〜4 frames、2 MiB以下へ限定する。stereo平均後にフレーム単位でDC除去・peak 0.95正規化し、コア側でも全入力を先に検証してから10段mipを生成するため、無音／NaN／Inf／過大値の失敗では直前のCustom内容を変更しない。読込前はmainとWorkletの両方でvoice停止、event ring clear、出力ゲート閉鎖を行い、読込後も自動発音・自動selector変更・出力再開をしない。Custom音声はセッション限定でlocalStorage／パッチJSON／外部へ保存しない。未読込のCustom選択は直前値へ戻し、Custom参照パッチを新規セッションで復元するとBasic Shapesへフォールバックして通知する。engine version 16、core 72/72、Web 65/65、freestanding PASS。native/WASMは既存Saw fixtureでサンプル単位ビット一致。WASM 75,383 B（gzip 21,094 B）。無音安全ゲートのCustom slot実測は最大peak 0.008754、release後0、panic後0、NaN／Inf 0。ローカルChromiumで2048-sample stereo float WAVを57.0 msで読込後、出力ミュートのままslot 4選択と設定図更新を確認した。1280px／390pxとも横溢れなし、LOAD WAV 44px、console warning/error 0。Python版Playwrightが環境にないため従来の`tools/test-studio-ui.py`とdesign-lint一括実行は未実施。音色の本人試聴、Safari／実機タッチ、AUからのCustom読込UIは未確認。仕様は`SPEC_M4r.md`。
+
 ## 進め方
 
 思考・設計・検証は Claude、実装は Codex へ委譲（`_claude-rules/codex-delegation.md`）。

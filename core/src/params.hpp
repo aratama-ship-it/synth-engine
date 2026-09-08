@@ -6,7 +6,7 @@
 namespace synth {
 
 inline constexpr SynthParamInfo kParameterInfo[] = {
-    {0, "oscAWavetable", "Osc A Wavetable", 0.0f, 3.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {0, "oscAWavetable", "Osc A Wavetable", 0.0f, 4.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
     {1, "oscAMorph", "Osc A Morph", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
     {2, "oscALevel", "Osc A Level", 0.0f, 4.0f, 0.8f, SYNTH_PARAM_FLAG_GAIN},
     {3, "ampAttack", "Amp Attack", 0.0f, 60.0f, 0.005f, SYNTH_PARAM_FLAG_SECONDS},
@@ -26,7 +26,7 @@ inline constexpr SynthParamInfo kParameterInfo[] = {
      SYNTH_PARAM_FLAG_CENTS | SYNTH_PARAM_FLAG_BIPOLAR},
     {15, "oscAPhaseMode", "Osc A Phase Mode", 0.0f, 2.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
     {16, "oscAPhase", "Osc A Phase", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
-    {17, "oscBWavetable", "Osc B Wavetable", 0.0f, 3.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {17, "oscBWavetable", "Osc B Wavetable", 0.0f, 4.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
     {18, "oscBMorph", "Osc B Morph", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
     {19, "oscBLevel", "Osc B Level", 0.0f, 4.0f, 0.0f, SYNTH_PARAM_FLAG_GAIN},
     {20, "oscBUnison", "Osc B Unison", 1.0f, 4.0f, 1.0f, SYNTH_PARAM_FLAG_INTEGER},

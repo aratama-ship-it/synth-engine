@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="SynthEngineのウェーブテーブル・シンセサイザーをブラウザで演奏し編集する画面">
   <title>SynthEngine — Web Synth</title>
-  <link rel="stylesheet" href="./synth-ui.css?m4o=1">
+  <link rel="stylesheet" href="./synth-ui.css?m4r=1">
 </head>
 <body>
   <header class="topbar">
@@ -28,7 +28,7 @@
       <div id="voice-controls" class="global-controls" aria-label="発音数"></div>
       <p>LOCAL ONLY · 保存はこのブラウザ内。別の環境へ移すときはEXPORT JSON。</p>
       <p class="signal-note">SIGNAL: OSC / FILTER / AMP → MASTER → INSERTS → DRY + DELAY + REVERB</p>
-      <p>4 WT × 4 frames · 3 ENV · 2 LFO · 4 Macro · 6 matrix slots</p>
+      <p>4 BUILTIN WT + 1 SESSION · 3 ENV · 2 LFO · 4 Macro · 6 matrix slots</p>
     </section>
   </header>
 
@@ -84,6 +84,16 @@
           </div>
           <small id="fm-quality-state">Full depth · legacy spectrum</small>
         </div>
+      </section>
+      <section class="wavetable-import" aria-labelledby="wavetable-import-title">
+        <div class="wavetable-import-heading">
+          <p class="eyebrow">CUSTOM WT</p>
+          <h2 id="wavetable-import-title">LOCAL WAV · SESSION ONLY</h2>
+        </div>
+        <p>PCM / float WAV · 2048 samples × 1–4 frames · mono / stereo</p>
+        <button id="load-wavetable" class="button button-quiet" type="button">LOAD WAV</button>
+        <input id="wavetable-file" class="visually-hidden" type="file" accept=".wav,audio/wav,audio/x-wav" tabindex="-1" aria-hidden="true">
+        <strong id="wavetable-import-state" aria-live="polite">NOT LOADED</strong>
       </section>
       <div class="oscillator-pair">
         <section class="module module-osc oscillator-card" aria-labelledby="osc-a-title">
@@ -287,6 +297,6 @@
       <div class="piano-scroll"><div id="piano" class="piano" aria-label="C4からC6までの鍵盤"></div></div>
     </section>
   </main>
-  <script type="module" src="./synth-ui.js?m4p=1"></script>
+  <script type="module" src="./synth-ui.js?m4r=1"></script>
 </body>
 </html>

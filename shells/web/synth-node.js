@@ -107,9 +107,16 @@ export async function createSynthNode(context, wasmBytes) {
     for (const listener of listeners) listener(message);
     if (message?.type === "ready") {
       for (const [id, waiter] of waiters) {
+        if (waiter.type !== "ready") continue;
         waiter.resolve(message);
         waiters.delete(id);
       }
+    } else if (message?.type === "wavetableLoaded") {
+      const waiter = waiters.get(message.requestId);
+      if (!waiter || waiter.type !== "wavetable") return;
+      waiters.delete(message.requestId);
+      if (message.result === 0) waiter.resolve(message);
+      else waiter.reject(new Error(message.message || `synth_load_wavetable failed: ${message.result}`));
     } else if (message?.type === "error") {
       const error = new Error(message.message || "AudioWorklet error");
       for (const [id, waiter] of waiters) {
@@ -186,12 +193,38 @@ export async function createSynthNode(context, wasmBytes) {
     reset(kind = 0, seed = 1) {
       audioNode.port.postMessage({ type: "reset", kind, seed });
     },
+    loadWavetable(slot, frames) {
+      const targetSlot = Number(slot);
+      if (!Number.isInteger(targetSlot) || targetSlot < 0) {
+        return Promise.reject(new TypeError("wavetable slot must be a non-negative integer"));
+      }
+      if (!(frames instanceof Float32Array) || frames.length < 2048 ||
+          frames.length > 8192 || frames.length % 2048 !== 0) {
+        return Promise.reject(new TypeError("wavetable frames must contain 1-4 frames of 2048 float samples"));
+      }
+      if (!frames.every(Number.isFinite)) {
+        return Promise.reject(new TypeError("wavetable frames must contain only finite samples"));
+      }
+      const requestId = nextMessageId++;
+      const payload = frames.slice();
+      const loaded = new Promise((resolve, reject) => {
+        waiters.set(requestId, { type: "wavetable", resolve, reject });
+      });
+      audioNode.port.postMessage({
+        type: "wavetable",
+        requestId,
+        slot: targetSlot,
+        frameCount: payload.length / 2048,
+        frames: payload,
+      }, [payload.buffer]);
+      return loaded;
+    },
     sendEvents(events) {
       postEvents(events);
     },
     batch(preset, events) {
       const id = nextMessageId++;
-      const ready = new Promise((resolve, reject) => waiters.set(id, { resolve, reject }));
+      const ready = new Promise((resolve, reject) => waiters.set(id, { type: "ready", resolve, reject }));
       audioNode.port.postMessage({ type: "batch", preset, events });
       return ready;
     },
