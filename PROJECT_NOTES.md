@@ -338,7 +338,7 @@ C++ CLIレンダラー（プリセット＋イベントJSON → WAV）を基準�
 - **2026-09-08 M4p Web鳴りっぱなし再発対策（ローカル・非公開）**。
   本人から鳴りっぱなし再発の報告を受けた。単純なクリック／PCキー押下では再現しなかったため、再発し得る未保護経路を閉じた。初回Audio準備中に解放またはpanicした要求は世代付きNote Registryで失効させ、失効後に出力ゲートを再度開かない。画面鍵盤のpointerup / pointercancel / mouseupをwindow captureでも回収し、capture失敗時のpointerleaveを追加。PC keyup / keydownもcaptureし、`event.code`に加えて`event.key`をfallbackにする。Escapeは全ノート・voice・出力を即時panicする。同一オリジンの複数シンセタブにはBroadcastChannelで発音権を通知し、新しく弾いたタブ以外を停止する。Note Registryの競合・一括失効・同鍵盤複数入力を3件追加し、Web 62/62、core 71/71、diff check PASS。実Chromiumで修正版読込、初回画面鍵盤、PCキー、Escape後のactive key 0、console warning/error 0を確認。DSPコア、プリセット、WASM、AU、音色パラメータは変更せず、WASM SHA-256はM4o時点と一致。正確な元イベントと聴感上の最終解消は本人確認待ち。
 
-- **2026-09-08 M4q 無音AudioWorklet安全ゲート追加（ローカル）**。
+- **2026-09-08 M4q 無音AudioWorklet安全ゲート追加（GitHub公開版）**。
   発音系の変更を一件ずつ止めて検証するため、`shells/web/tests/audio-safety.test.mjs`を追加した。物理出力やAudioContextへ接続せず、実WASMをSynthEngineProcessorへ読み込んで48 kHz／128 framesでブロック処理する。低出力プリセットで初回発音、Morph変更前後の発音継続、note-off、voice resetによるpanicを順に実行し、全サンプルの有限性、peak 0.25以下、release／panic後1e-7以下を必須にした。実測は変更前peak 0.008005、変更後peak 0.008108、全体最大0.009215、release後0、panic前0.005232、panic後0、NaN／Inf 0。Web 63/63、core 71/71、freestanding PASS。GitHub ActionsはWASMビルド後に同じWebテスト入口を実行する。UI、DSPコア、プリセット、WASM、AU、音色パラメータは変更していない。次の機能変更はこのゲート合格後に一件だけ進める。
 
 ## 進め方
