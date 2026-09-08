@@ -13,7 +13,13 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-def request_json(base_url: str, path: str, method: str = "GET", payload: object | None = None) -> object:
+def request_json(
+    base_url: str,
+    path: str,
+    method: str = "GET",
+    payload: object | None = None,
+    timeout_seconds: float = 5,
+) -> object:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     request = Request(
         f"{base_url}{path}",
@@ -22,13 +28,14 @@ def request_json(base_url: str, path: str, method: str = "GET", payload: object 
         headers={"Content-Type": "application/json"} if data else {},
     )
     try:
-        with urlopen(request, timeout=5) as response:
+        with urlopen(request, timeout=timeout_seconds) as response:
             return json.load(response)
     except HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"WebDriver {method} {path} returned {error.code}: {detail}") from error
-    except URLError as error:
-        raise RuntimeError(f"WebDriver {method} {path} was unreachable: {error.reason}") from error
+    except (TimeoutError, URLError) as error:
+        reason = getattr(error, "reason", error)
+        raise RuntimeError(f"WebDriver {method} {path} was unreachable: {reason}") from error
 
 
 def value(response: object) -> object:
@@ -107,11 +114,17 @@ def main() -> int:
                     }
                 }
             }
-            created = value(request_json(base_url, "/session", "POST", capabilities))
+            created = value(request_json(base_url, "/session", "POST", capabilities, timeout_seconds=30))
             if not isinstance(created, dict) or not isinstance(created.get("sessionId"), str):
                 raise RuntimeError(f"ChromeDriver did not return a session id: {created!r}")
             session_id = created["sessionId"]
-            request_json(base_url, f"/session/{session_id}/url", "POST", {"url": args.url})
+            request_json(
+                base_url,
+                f"/session/{session_id}/url",
+                "POST",
+                {"url": args.url},
+                timeout_seconds=30,
+            )
 
             deadline = time.monotonic() + args.timeout_seconds
             while time.monotonic() < deadline:
