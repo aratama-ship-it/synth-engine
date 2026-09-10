@@ -36,7 +36,8 @@ test("brightness within five percent is aligned without an apply candidate", () 
 
 test("bypass, unsupported modes, boundaries, reversed response, and low sensitivity are unavailable", () => {
   assert.equal(planFilterCutoffProbe({ ...base, filterEnabled:0 }).state, "unavailable");
-  assert.equal(planFilterCutoffProbe({ ...base, filterMode:4 }).state, "unavailable");
+  assert.equal(planFilterCutoffProbe({ ...base, filterMode:1 }).state, "unavailable");
+  assert.equal(planFilterCutoffProbe({ ...base, filterMode:4 }).state, "calibrating");
   assert.equal(planFilterCutoffProbe({ ...base, currentCutoff:20000 }).state, "unavailable");
   const plan = planFilterCutoffProbe(base);
   assert.equal(estimateFilterCutoff(plan, 350).state, "unavailable");

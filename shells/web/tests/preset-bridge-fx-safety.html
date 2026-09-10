@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SynthEngine — Preset Bridge FX Safety</title>
+<style>
+  :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  body { margin: 0; background: #101216; color: #edf1f7; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 20px 48px; }
+  h1 { font: 600 20px/1.3 system-ui, sans-serif; margin: 0 0 12px; }
+  p { color: #bac3d0; line-height: 1.6; }
+  #summary { padding: 12px 14px; border: 1px solid #586271; border-radius: 8px; color: #eef3fb; }
+  #summary.pass { border-color: #3b9b75; color: #98e7bf; }
+  #summary.fail { border-color: #dc6565; color: #ffb2ae; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; color: #c8d1dc; font-size: 12px; line-height: 1.55; }
+</style>
+<main>
+  <h1>Preset Bridge FX Safety</h1>
+  <p>3つの変換候補を実ブラウザのOfflineAudioContextで描画します。物理オーディオ出力には接続しません。</p>
+  <p id="summary" role="status" aria-live="polite">検査を開始しています…</p>
+  <pre id="details"></pre>
+</main>
+<script type="module">
+import { createInsertFxRack } from "../fx-rack.js";
+import { createSynthNode } from "../synth-node.js";
+
+const CANDIDATES = [
+  ["pianofy", "../../../design/preset-bridge-20260909/audition-mod-fx-v2/pianofy.synthengine.json"],
+  ["morpheus", "../../../design/preset-bridge-20260909/audition-mod-fx-v2/morpheus-bass.synthengine.json"],
+  ["neon-drive", "../../../design/preset-bridge-20260909/audition-mod-fx-v2/neon-drive-sync.synthengine.json"],
+];
+const SAMPLE_RATE = 48_000;
+const FRAMES = 131_072;
+const NOTE_ON_FRAME = 512;
+const NOTE_OFF_FRAME = 8_192;
+const ACTIVE_FLOOR = 1e-4;
+const PEAK_CEILING = 0.25;
+const SILENCE_CEILING = 1e-7;
+const summary = document.querySelector("#summary");
+const details = document.querySelector("#details");
+
+function rangeStats(buffer, startFrame, endFrame) {
+  let peak = 0;
+  let nonFinite = 0;
+  for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+    const samples = buffer.getChannelData(channel);
+    for (let frame = startFrame; frame < endFrame; frame += 1) {
+      const sample = samples[frame];
+      if (!Number.isFinite(sample)) nonFinite += 1;
+      else peak = Math.max(peak, Math.abs(sample));
+    }
+  }
+  return { peak, nonFinite };
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+async function renderCandidate(id, path, wasmBytes) {
+  const patchResponse = await fetch(path);
+  assert(patchResponse.ok, `${id}: patch fetch failed (${patchResponse.status})`);
+  const patch = await patchResponse.json();
+  const context = new OfflineAudioContext(2, FRAMES, SAMPLE_RATE);
+  const synth = await createSynthNode(context, wasmBytes.slice(0));
+  const rack = createInsertFxRack(context, synth, context.destination);
+  rack.setValues(patch.fx);
+  await synth.batch(patch.core, [
+    { frame:NOTE_ON_FRAME, kind:1, id:1, a:60, b:0.5 },
+    { frame:NOTE_OFF_FRAME, kind:2, id:1, a:0, b:0 },
+  ]);
+  const rendered = await context.startRendering();
+  synth.disconnect();
+  rack.output.disconnect();
+  const result = {
+    id,
+    initial:rangeStats(rendered, 0, NOTE_ON_FRAME),
+    active:rangeStats(rendered, NOTE_ON_FRAME + 512, NOTE_OFF_FRAME),
+    tail:rangeStats(rendered, FRAMES - 4_096, FRAMES),
+    all:rangeStats(rendered, 0, FRAMES),
+  };
+  assert(result.all.nonFinite === 0, `${id}: render produced NaN or Infinity`);
+  assert(result.initial.peak <= SILENCE_CEILING, `${id}: output before note-on (${result.initial.peak})`);
+  assert(result.active.peak > ACTIVE_FLOOR, `${id}: note was not audible (${result.active.peak})`);
+  assert(result.all.peak <= PEAK_CEILING, `${id}: peak ${result.all.peak} exceeded ${PEAK_CEILING}`);
+  assert(result.tail.peak <= SILENCE_CEILING, `${id}: release tail remained (${result.tail.peak})`);
+  return result;
+}
+
+try {
+  const wasmResponse = await fetch("../../../build/synth_engine.wasm?m4aq=1");
+  assert(wasmResponse.ok, `WASM fetch failed (${wasmResponse.status})`);
+  const wasmBytes = await wasmResponse.arrayBuffer();
+  const results = [];
+  for (const [id, path] of CANDIDATES) results.push(await renderCandidate(id, path, wasmBytes));
+  const result = { physicalOutput:"not connected (OfflineAudioContext only)", sampleRate:SAMPLE_RATE, results };
+  window.__PRESET_BRIDGE_FX_SAFETY_RESULT__ = result;
+  document.body.dataset.status = "pass";
+  summary.textContent = "合格 — 3候補の初期無音・有限性・peak・release後無音を確認しました。";
+  summary.classList.add("pass");
+  details.textContent = JSON.stringify(result, null, 2);
+} catch (error) {
+  const result = { error:String(error?.stack || error) };
+  window.__PRESET_BRIDGE_FX_SAFETY_RESULT__ = result;
+  document.body.dataset.status = "fail";
+  summary.textContent = "不合格 — 詳細を確認してください。";
+  summary.classList.add("fail");
+  details.textContent = result.error;
+}
+</script>

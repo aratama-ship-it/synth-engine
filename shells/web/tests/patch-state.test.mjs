@@ -25,10 +25,38 @@ test("patch parser rejects schema drift, duplicate IDs, non-finite values, and m
   assert.throws(() => parsePatch("{"), SyntaxError);
 });
 
-test("patch schema accepts appended modulation parameters without renumbering older core values", () => {
-  const extended = validatePatch({ ...patch(), core:[[0, 1], [79, .5], [82, .25], [83, .4], [84, .6], [85, .01], [86, .2], [87, .5], [88, .4], [89, 1], [90, 1], [112, 3]] });
-  assert.deepEqual(extended.core.slice(-9), [[83, .4], [84, .6], [85, .01], [86, .2], [87, .5], [88, .4], [89, 1], [90, 1], [112, 3]]);
-  assert.throws(() => validatePatch({ ...patch(), core:[[113, 0]] }), /invalid/);
+test("patch schema accepts appended articulation, warp, and parametric EQ parameters without renumbering older core values", () => {
+  const extended = validatePatch({ ...patch(), core:[[0, 1], [79, .5], [82, .25], [83, .4], [84, .6], [85, .01], [86, .2], [87, .5], [88, .4], [89, 1], [90, 1], [112, 3], [113, 2], [114, .12], [115, .5], [116, .75], [117, -.6], [118, .6], [119, 1], [120, 1], [121, 180], [122, 1400], [123, 1.2], [124, 7200]] });
+  const values = new Map(extended.core);
+  assert.equal(values.get(112), 3);
+  assert.equal(values.get(113), 2);
+  assert.equal(values.get(114), .12);
+  assert.equal(values.get(115), .5);
+  assert.equal(values.get(116), .75);
+  assert.equal(values.get(117), -.6);
+  assert.equal(values.get(118), .6);
+  assert.equal(values.get(119), 1);
+  assert.equal(values.get(120), 1);
+  assert.equal(values.get(121), 180);
+  assert.equal(values.get(122), 1400);
+  assert.equal(values.get(123), 1.2);
+  assert.equal(values.get(124), 7200);
+  assert.throws(() => validatePatch({ ...patch(), core:[[125, 0]] }), /invalid/);
+});
+
+test("legacy insert patches receive the former fixed EQ frequency and Q defaults", () => {
+  const legacyFx = structuredClone(FX_DEFAULTS);
+  legacyFx.modules.eq = { on:true, low:2, mid:-1, high:3 };
+  const restored = validatePatch({ ...patch(), core:[[0, 1]], fx:legacyFx });
+  assert.deepEqual(
+    {
+      lowFrequency:restored.fx.modules.eq.lowFrequency,
+      midFrequency:restored.fx.modules.eq.midFrequency,
+      midQ:restored.fx.modules.eq.midQ,
+      highFrequency:restored.fx.modules.eq.highFrequency,
+    },
+    { lowFrequency:160, midFrequency:1200, midQ:.75, highFrequency:6800 },
+  );
 });
 
 test("history restores edited states and discards redo after a new branch", () => {

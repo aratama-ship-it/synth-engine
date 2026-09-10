@@ -29,11 +29,14 @@ test("insert order contains each supported effect exactly once", () => {
 });
 
 test("insert patch clamps finite values and rejects unknown controls", () => {
-  const next = sanitizeFxPatch(structuredClone(FX_DEFAULTS), { modules:{ distortion:{ on:true, drive:4 }, compressor:{ threshold:-100, ratio:40 } } });
+  const next = sanitizeFxPatch(structuredClone(FX_DEFAULTS), { modules:{ distortion:{ on:true, drive:4 }, eq:{ lowFrequency:10, midQ:20, highFrequency:22000 }, compressor:{ threshold:-100, ratio:40 } } });
   assert.equal(next.modules.distortion.on, true);
   assert.equal(next.modules.distortion.drive, 1);
   assert.equal(next.modules.compressor.threshold, -60);
   assert.equal(next.modules.compressor.ratio, 20);
+  assert.equal(next.modules.eq.lowFrequency, 40);
+  assert.equal(next.modules.eq.midQ, 8);
+  assert.equal(next.modules.eq.highFrequency, 18000);
   assert.throws(() => sanitizeFxPatch(next, { modules:{ chorus:{ rate:Number.NaN } } }), /finite number/);
   assert.throws(() => sanitizeFxPatch(next, { modules:{ limiter:{ on:true } } }), /unknown insert effect/);
 });
@@ -59,13 +62,17 @@ test("suspended rack applies bypass gains before audio starts instead of schedul
 test("human-readable insert patch maps to contiguous shared-core parameters", () => {
   const params = new Map(fxCoreParams({
     order:["eq", "distortion", "compressor", "chorus"],
-    modules:{ distortion:{ on:true, drive:.7 }, chorus:{ mix:.4 }, eq:{ high:6 }, compressor:{ threshold:-24 } },
+    modules:{ distortion:{ on:true, drive:.7 }, chorus:{ mix:.4 }, eq:{ high:6, lowFrequency:180, midFrequency:1500, midQ:1.4, highFrequency:7200 }, compressor:{ threshold:-24 } },
   }));
-  assert.equal(params.size, 23);
+  assert.equal(params.size, 27);
   assert.equal(params.get(FX_CORE_PARAM_IDS.distortion.on), 1);
   assert.equal(params.get(FX_CORE_PARAM_IDS.distortion.drive), .7);
   assert.equal(params.get(FX_CORE_PARAM_IDS.chorus.on), 0);
   assert.equal(params.get(FX_CORE_PARAM_IDS.eq.high), 6);
+  assert.equal(params.get(FX_CORE_PARAM_IDS.eq.lowFrequency), 180);
+  assert.equal(params.get(FX_CORE_PARAM_IDS.eq.midFrequency), 1500);
+  assert.equal(params.get(FX_CORE_PARAM_IDS.eq.midQ), 1.4);
+  assert.equal(params.get(FX_CORE_PARAM_IDS.eq.highFrequency), 7200);
   assert.equal(params.get(FX_CORE_PARAM_IDS.compressor.threshold), -24);
   assert.deepEqual(FX_CORE_PARAM_IDS.order.map((id) => params.get(id)), [2, 0, 3, 1]);
 });

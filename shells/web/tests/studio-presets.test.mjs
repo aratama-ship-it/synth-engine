@@ -35,7 +35,7 @@ test("studio preset candidates are parseable and only address SynthEngine parame
     assert.equal(ids.size, values.length, `${file} should not define a parameter twice`);
     assert.ok(ids.has(75), `${file} should opt into the SPACE send bus`);
     for (const [id, value] of values) {
-      assert.ok(id >= 0 && id < 113, `${file} parameter ${id} should be in range`);
+      assert.ok(id >= 0 && id < 125, `${file} parameter ${id} should be in range`);
       assert.ok(Number.isFinite(value), `${file} parameter ${id} should be finite`);
     }
   }

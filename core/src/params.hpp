@@ -5,6 +5,8 @@
 
 namespace synth {
 
+inline constexpr float kUnisonDensityMaximum = 1.224744871391589f;
+
 inline constexpr SynthParamInfo kParameterInfo[] = {
     {0, "oscAWavetable", "Osc A Wavetable", 0.0f, 4.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
     {1, "oscAMorph", "Osc A Morph", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
@@ -78,22 +80,22 @@ inline constexpr SynthParamInfo kParameterInfo[] = {
     {53, "ampEgCurve", "Amp EG Curve", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
     {54, "filterEgCurve", "Filter EG Curve", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
     {55, "modSlot0Source", "Mod 1 Source", 0.0f, 11.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
-    {56, "modSlot0Dest", "Mod 1 Destination", 0.0f, 13.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {56, "modSlot0Dest", "Mod 1 Destination", 0.0f, 15.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
     {57, "modSlot0Amount", "Mod 1 Amount", -1.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_BIPOLAR},
     {58, "modSlot1Source", "Mod 2 Source", 0.0f, 11.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
-    {59, "modSlot1Dest", "Mod 2 Destination", 0.0f, 13.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {59, "modSlot1Dest", "Mod 2 Destination", 0.0f, 15.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
     {60, "modSlot1Amount", "Mod 2 Amount", -1.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_BIPOLAR},
     {61, "modSlot2Source", "Mod 3 Source", 0.0f, 11.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
-    {62, "modSlot2Dest", "Mod 3 Destination", 0.0f, 13.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {62, "modSlot2Dest", "Mod 3 Destination", 0.0f, 15.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
     {63, "modSlot2Amount", "Mod 3 Amount", -1.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_BIPOLAR},
     {64, "modSlot3Source", "Mod 4 Source", 0.0f, 11.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
-    {65, "modSlot3Dest", "Mod 4 Destination", 0.0f, 13.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {65, "modSlot3Dest", "Mod 4 Destination", 0.0f, 15.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
     {66, "modSlot3Amount", "Mod 4 Amount", -1.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_BIPOLAR},
     {67, "modSlot4Source", "Mod 5 Source", 0.0f, 11.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
-    {68, "modSlot4Dest", "Mod 5 Destination", 0.0f, 13.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {68, "modSlot4Dest", "Mod 5 Destination", 0.0f, 15.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
     {69, "modSlot4Amount", "Mod 5 Amount", -1.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_BIPOLAR},
     {70, "modSlot5Source", "Mod 6 Source", 0.0f, 11.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
-    {71, "modSlot5Dest", "Mod 6 Destination", 0.0f, 13.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
+    {71, "modSlot5Dest", "Mod 6 Destination", 0.0f, 15.0f, 0.0f, SYNTH_PARAM_FLAG_INTEGER},
     {72, "modSlot5Amount", "Mod 6 Amount", -1.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_BIPOLAR},
     {73, "macro1", "Macro 1", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
     {74, "macro2", "Macro 2", 0.0f, 1.0f, 0.0f, SYNTH_PARAM_FLAG_NONE},
@@ -163,6 +165,32 @@ inline constexpr SynthParamInfo kParameterInfo[] = {
      SYNTH_PARAM_FLAG_INTEGER},
     {112, "insertOrder4", "Insert Order 4", 0.0f, 3.0f, 3.0f,
      SYNTH_PARAM_FLAG_INTEGER},
+    {113, "voiceMode", "Voice Mode", 0.0f, 2.0f, 0.0f,
+     SYNTH_PARAM_FLAG_INTEGER},
+    {114, "glideTime", "Glide Time", 0.0f, 2.0f, 0.0f,
+     SYNTH_PARAM_FLAG_SECONDS},
+    {115, "oscAUnisonDensity", "Osc A Unison Density", 0.0f,
+     kUnisonDensityMaximum, 1.0f,
+     SYNTH_PARAM_FLAG_NONE},
+    {116, "oscBUnisonDensity", "Osc B Unison Density", 0.0f,
+     kUnisonDensityMaximum, 1.0f,
+     SYNTH_PARAM_FLAG_NONE},
+    {117, "oscAWarpAmount", "Osc A Warp Amount", -1.0f, 1.0f, 0.0f,
+     SYNTH_PARAM_FLAG_BIPOLAR},
+    {118, "oscBWarpAmount", "Osc B Warp Amount", -1.0f, 1.0f, 0.0f,
+     SYNTH_PARAM_FLAG_BIPOLAR},
+    {119, "oscAWarpMode", "Osc A Warp Mode", 0.0f, 2.0f, 0.0f,
+     SYNTH_PARAM_FLAG_INTEGER},
+    {120, "oscBWarpMode", "Osc B Warp Mode", 0.0f, 2.0f, 0.0f,
+     SYNTH_PARAM_FLAG_INTEGER},
+    {121, "eqLowFrequency", "EQ Low Frequency", 40.0f, 600.0f, 160.0f,
+     SYNTH_PARAM_FLAG_HERTZ},
+    {122, "eqMidFrequency", "EQ Mid Frequency", 200.0f, 8000.0f, 1200.0f,
+     SYNTH_PARAM_FLAG_HERTZ},
+    {123, "eqMidQ", "EQ Mid Q", 0.25f, 8.0f, 0.75f,
+     SYNTH_PARAM_FLAG_NONE},
+    {124, "eqHighFrequency", "EQ High Frequency", 1500.0f, 18000.0f, 6800.0f,
+     SYNTH_PARAM_FLAG_HERTZ},
 };
 
 inline constexpr uint32_t kParamCount =
@@ -175,7 +203,7 @@ constexpr bool parameter_ids_are_contiguous() {
     return true;
 }
 
-static_assert(kParamCount == 113);
+static_assert(kParamCount == 125);
 static_assert(parameter_ids_are_contiguous());
 
 }  // namespace synth

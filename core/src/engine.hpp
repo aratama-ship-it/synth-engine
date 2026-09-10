@@ -9,8 +9,10 @@ namespace synth {
 
 constexpr uint32_t kVoiceCapacity = 16;
 constexpr uint32_t kMaxUnison = 4;
+constexpr uint32_t kMonoHeldNoteCapacity = 64;
 constexpr uint32_t kVoiceParamCount = 22;
-constexpr uint32_t kControlSmoothingCount = 8;
+constexpr uint32_t kControlSmoothingCount = 12;
+constexpr uint32_t kWarpModeCount = 3;
 constexpr uint32_t kInsertFxCount = 4;
 constexpr uint32_t kChorusDelayCapacity = 16384;
 
@@ -22,15 +24,27 @@ enum ControlSmoothingIndex : uint32_t {
     kSmoothOscBLevel,
     kSmoothFmBToA,
     kSmoothSubLevel,
-    kSmoothNoiseLevel
+    kSmoothNoiseLevel,
+    kSmoothOscAUnisonDensity,
+    kSmoothOscBUnisonDensity,
+    kSmoothOscAWarpAmount,
+    kSmoothOscBWarpAmount
 };
 
 double unison_detune_position(uint32_t index, uint32_t count);
 double unison_pan_position(uint32_t index, uint32_t count);
 double unison_phase_offset(uint32_t index, uint32_t count);
 double unison_width_amount(double width, uint32_t curve);
+float unison_normalization(uint32_t count);
+float unison_density_normalization(uint32_t count, float density);
+float unison_density_weight(uint32_t index, uint32_t count, float density);
 float fm_high_guard_depth(float requested, double carrierHz,
                           double modulatorHz, double sampleRate);
+double oscillator_warp_phase(double phase, float amount, float modeMix);
+double oscillator_warp_frequency(double frequency, float amount);
+double oscillator_sync_ratio(float amount);
+double oscillator_sync_frequency(double frequency, float amount);
+double poly_blep(double phase, double phaseIncrement);
 
 enum EnvelopeStage : uint32_t {
     kEnvOff = 0,
@@ -45,6 +59,18 @@ struct SvfState {
     double ic2;
 };
 
+struct BiquadState {
+    double z1;
+    double z2;
+};
+
+struct HeldNote {
+    uint32_t id;
+    float midiNote;
+    float velocity;
+    uint64_t order;
+};
+
 struct Voice {
     uint32_t active;
     uint32_t noteId;
@@ -52,6 +78,7 @@ struct Voice {
     uint64_t startOrder;
     uint64_t releaseOrder;
     double baseFrequency;
+    double targetBaseFrequency;
     float midiNote;
     double phaseA[kMaxUnison];
     double phaseB[kMaxUnison];
@@ -64,10 +91,18 @@ struct Voice {
     float pinkState[3];
     float velocity;
     float envelope;
+    float ampSustainSmoothed;
     uint64_t envelopeStageSamples;
     float envelopeReleaseStart;
     uint32_t filterStage;
     float filterEnvelope;
+    float filterMix;
+    uint32_t filterMode;
+    uint32_t filterTransitionMode;
+    uint32_t filterPendingMode;
+    float filterModeMix;
+    float filterEnvAmountSmoothed;
+    float filterSustainSmoothed;
     uint64_t filterEnvelopeStageSamples;
     float filterEnvelopeReleaseStart;
     uint32_t modStage;
@@ -75,6 +110,7 @@ struct Voice {
     uint64_t modEnvelopeStageSamples;
     float modEnvelopeReleaseStart;
     SvfState filter[2][2];
+    SvfState filterTransition[2][2];
     double lfoPhase;
     uint64_t lfoCycleIndex;
     float lfoHold;
@@ -91,8 +127,10 @@ struct InsertFxState {
     float chorusDelay[2][kChorusDelayCapacity];
     uint32_t chorusWrite;
     double chorusPhase[2];
-    float eqLow[2];
-    float eqHighLow[2];
+    float eqGainSmoothed[3];
+    float eqFrequencySmoothed[3];
+    float eqMidQSmoothed;
+    BiquadState eq[3][2];
     float compressorEnvelope;
 };
 
@@ -111,6 +149,7 @@ struct SynthEngine {
     double filterSmoothingCoefficient;
     double macroSmoothed[4];
     double controlSmoothed[synth::kControlSmoothingCount];
+    double warpModeSmoothed[2][synth::kWarpModeCount];
     double globalLfoPhase;
     uint64_t globalLfoCycleIndex;
     float globalLfoHold;
@@ -120,6 +159,8 @@ struct SynthEngine {
     float params[synth::kParamCount];
     uint32_t pendingVoiceParamMask;
     float pendingVoiceParams[synth::kVoiceParamCount];
+    synth::HeldNote monoHeldNotes[synth::kMonoHeldNoteCapacity];
+    uint32_t monoHeldNoteCount;
     synth::Voice voices[synth::kVoiceCapacity];
     synth::InsertFxState insertFx;
     synth::WavetableBank wavetable;

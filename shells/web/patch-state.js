@@ -1,4 +1,4 @@
-import { FX_DEFAULTS, sanitizeFxPatch } from "./fx-rack.js";
+import { FX_DEFAULTS, sanitizeFxPatch } from "./fx-rack.js?m4ax=1";
 import { REVERB_MATERIALS, SPACE_DEFAULTS } from "./space-effects.js";
 
 export const PATCH_SCHEMA_VERSION = 1;
@@ -21,7 +21,7 @@ export function validatePatch(candidate) {
   if (!Array.isArray(candidate.core)) throw new TypeError("patch core must be an array");
   const seen = new Set(); const core = candidate.core.map((entry, index) => {
     if (!Array.isArray(entry) || entry.length !== 2) throw new TypeError(`patch core entry ${index} must be [id,value]`);
-    const id = Number(entry[0]); if (!Number.isInteger(id) || id < 0 || id > 112 || seen.has(id)) throw new RangeError(`invalid or duplicate core parameter id: ${entry[0]}`); seen.add(id);
+    const id = Number(entry[0]); if (!Number.isInteger(id) || id < 0 || id > 124 || seen.has(id)) throw new RangeError(`invalid or duplicate core parameter id: ${entry[0]}`); seen.add(id);
     return [id, finite(entry[1], `core ${id}`)];
   }).sort((a, b) => a[0] - b[0]);
   if (!candidate.space || typeof candidate.space !== "object" || Array.isArray(candidate.space)) throw new TypeError("patch space must be an object");

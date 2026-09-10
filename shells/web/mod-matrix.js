@@ -5,10 +5,12 @@ export const MOD_SOURCES = Object.freeze([
 export const MOD_DESTINATIONS = Object.freeze([
   "None", "OSC A Level", "OSC B Level", "OSC A Position", "OSC B Position", "FM B → A",
   "Sub Level", "Noise Level", "Filter Cutoff", "Filter Resonance", "Pitch", "OSC A Detune", "LFO Rate", "Amp",
+  "OSC A Warp", "OSC B Warp",
 ]);
 
 export const MOD_DEST_BY_PARAM = Object.freeze({
   2:1, 19:2, 1:3, 18:4, 28:5, 29:6, 32:7, 37:8, 38:9, 13:10, 10:11, 46:12,
+  117:14, 118:15,
 });
 
 export function modulationSlotIds(index) {

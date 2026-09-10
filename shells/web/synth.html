@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="SynthEngineのウェーブテーブル・シンセサイザーをブラウザで演奏し編集する画面">
   <title>SynthEngine — Web Synth</title>
-  <link rel="stylesheet" href="./synth-ui.css?m4t=1">
+  <link rel="stylesheet" href="./synth-ui.css?m4ax=1">
 </head>
 <body>
   <header class="topbar">
     <div class="identity"><span class="identity-mark" aria-hidden="true">SE</span><h1>SynthEngine</h1></div>
     <div class="top-controls">
+      <button id="panic-audio" class="button button-emergency" type="button" aria-label="音をただちに停止">STOP SOUND</button>
       <label class="preset-picker">PRESET <select id="preset" aria-label="プリセット"></select></label>
       <button id="save-patch" class="button button-quiet" type="button">SAVE</button>
       <button id="undo" class="button button-quiet" type="button" disabled>UNDO</button>
@@ -24,8 +25,8 @@
       <button id="export-patch" class="button button-quiet" type="button">EXPORT JSON</button>
       <button id="import-patch" class="button button-quiet" type="button">IMPORT JSON</button>
       <input id="patch-file" class="visually-hidden" type="file" accept="application/json,.json" tabindex="-1">
+      <a id="preset-bridge" class="button button-quiet button-link" href="../../design/preset-bridge-20260909/index.html" target="_blank" rel="noreferrer" hidden>PRESET BRIDGE</a>
       <button id="init" class="button button-quiet" type="button">INIT PATCH</button>
-      <div id="voice-controls" class="global-controls" aria-label="発音数"></div>
       <p>LOCAL ONLY · 保存はこのブラウザ内。別の環境へ移すときはEXPORT JSON。</p>
       <p class="signal-note">SIGNAL: OSC / FILTER / AMP → MASTER → INSERTS → DRY + DELAY + REVERB</p>
       <p>4 BUILTIN WT + 1 SESSION · 3 ENV · 2 LFO · 4 Macro · 6 matrix slots</p>
@@ -84,6 +85,25 @@
           </div>
           <small id="fm-quality-state">Full depth · legacy spectrum</small>
         </div>
+        <div class="quality-setting">
+          <span>4-VOICE DENSITY</span>
+          <div class="quality-options quality-density-options" role="group" aria-label="4声ユニゾンの密度モード">
+            <button id="unison-density-focus" class="quality-option" type="button" aria-pressed="false">2.0 FOCUS</button>
+            <button id="unison-density-balanced" class="quality-option" type="button" aria-pressed="false">3.0 BALANCED</button>
+            <button id="unison-density-full" class="quality-option is-selected" type="button" aria-pressed="true">4.0 FULL</button>
+            <button id="unison-density-wide" class="quality-option" type="button" aria-pressed="false">5.0 WIDE+</button>
+          </div>
+          <small id="unison-density-state">4.0 · original four-voice balance</small>
+        </div>
+        <div class="quality-setting">
+          <span>OSC BEND WARP</span>
+          <div class="quality-options quality-warp-options" role="group" aria-label="OSC AとBのBend Warp方向">
+            <button id="osc-warp-bend-negative" class="quality-option" type="button" aria-pressed="false">BEND -</button>
+            <button id="osc-warp-off" class="quality-option is-selected" type="button" aria-pressed="true">OFF</button>
+            <button id="osc-warp-bend-positive" class="quality-option" type="button" aria-pressed="false">BEND +</button>
+          </div>
+          <small id="osc-warp-state">A/B 0% · original</small>
+        </div>
       </section>
       <section class="wavetable-import" aria-labelledby="wavetable-import-title">
         <div class="wavetable-import-heading">
@@ -107,11 +127,21 @@
         <section class="module module-osc oscillator-card" aria-labelledby="osc-a-title">
           <div class="module-heading"><p>A</p><h2 id="osc-a-title">OSCILLATOR A</h2><div id="wave-picker-a" class="wave-picker"></div></div>
           <svg id="wave-a" class="waveform" viewBox="0 0 520 152" role="img" aria-label="Oscillator Aの現在の波形"><path class="wave-grid" d="M0 76H520 M130 0V152 M260 0V152 M390 0V152"></path><path class="wave-line" d=""></path></svg>
+          <div class="osc-warp-surface" aria-label="Oscillator A Warp">
+            <label class="osc-warp-mode"><span>WARP</span><select id="osc-warp-mode-a" aria-label="Oscillator A Warp mode"><option value="off">OFF</option><option value="bend">BEND</option><option value="asym">ASYM</option><option value="sync">SYNC</option></select></label>
+            <div id="osc-warp-amount-a" class="osc-warp-amount"></div>
+            <small id="osc-warp-state-a">OFF · original</small>
+          </div>
           <div id="osc-a" class="control-grid oscillator-controls"></div>
         </section>
         <section class="module module-osc oscillator-card" aria-labelledby="osc-b-title">
           <div class="module-heading"><p>B</p><h2 id="osc-b-title">OSCILLATOR B</h2><div id="wave-picker-b" class="wave-picker"></div></div>
           <svg id="wave-b" class="waveform" viewBox="0 0 520 152" role="img" aria-label="Oscillator Bの現在の波形"><path class="wave-grid" d="M0 76H520 M130 0V152 M260 0V152 M390 0V152"></path><path class="wave-line" d=""></path></svg>
+          <div class="osc-warp-surface" aria-label="Oscillator B Warp">
+            <label class="osc-warp-mode"><span>WARP</span><select id="osc-warp-mode-b" aria-label="Oscillator B Warp mode"><option value="off">OFF</option><option value="bend">BEND</option><option value="asym">ASYM</option><option value="sync">SYNC</option></select></label>
+            <div id="osc-warp-amount-b" class="osc-warp-amount"></div>
+            <small id="osc-warp-state-b">OFF · original</small>
+          </div>
           <div id="osc-b" class="control-grid oscillator-controls"></div>
         </section>
       </div>
@@ -301,10 +331,10 @@
     </section>
 
     <section class="keyboard-section" aria-labelledby="keyboard-title">
-      <div class="performance-strip"><div><p class="eyebrow">PERFORMANCE</p><h2 id="keyboard-title">MACROS + KEYBOARD</h2></div><div id="performance-macros" class="performance-macros"></div><div class="keyboard-guide"><p>PC: Z OCT− / X OCT+ · A W S E D F T G Y H U J K · 初回入力でAudio開始</p><strong id="keyboard-octave-state" aria-live="polite">OCTAVE 0 · C4–C5</strong></div></div>
+      <div class="performance-strip"><div><p class="eyebrow">PERFORMANCE</p><h2 id="keyboard-title">MACROS + PLAY</h2></div><div class="performance-controls"><div id="performance-macros" class="performance-macros"></div><section class="performance-voice" aria-label="発音モードとグライド"><p>VOICE</p><div id="voice-controls" class="global-controls" aria-label="発音モードとグライド"></div></section></div><div class="keyboard-guide"><p>PC: Z OCT− / X OCT+ · A W S E D F T G Y H U J K · 初回入力でAudio開始</p><strong id="keyboard-octave-state" aria-live="polite">OCTAVE 0 · C4–C5</strong></div></div>
       <div class="piano-scroll"><div id="piano" class="piano" aria-label="C4からC6までの鍵盤"></div></div>
     </section>
   </main>
-  <script type="module" src="./synth-ui.js?m4t=1"></script>
+  <script type="module" src="./synth-ui.js?m4ax=1"></script>
 </body>
 </html>

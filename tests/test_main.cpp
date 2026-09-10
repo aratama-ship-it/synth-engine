@@ -852,19 +852,24 @@ static bool test_parameter_sweep() {
         {0.0f, 0.0f, 5.0f}, {0.0f, 0.0f, 1.0f}, {-8.0f, 0.0f, 8.0f},
         {-1200.0f, 0.0f, 1200.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
         {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 13.0f}, {-1.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 15.0f}, {-1.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 15.0f}, {-1.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 15.0f}, {-1.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 15.0f}, {-1.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 15.0f}, {-1.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 11.0f}, {0.0f, 0.0f, 15.0f}, {-1.0f, 0.0f, 1.0f},
         {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
         {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
         {0.01f, 0.25f, 40.0f}, {0.0f, 1.0f, 5.0f},
         {0.0f, 0.0f, 1.0f}, {0.0f, 0.25f, 1.0f},
         {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
         {0.0f, 0.005f, 20.0f}, {0.0f, 0.2f, 20.0f},
-        {0.0f, 0.0f, 1.0f}, {0.0f, 0.2f, 20.0f}, {0.0f, 0.0f, 1.0f}
+        {0.0f, 0.0f, 1.0f}, {0.0f, 0.2f, 20.0f}, {0.0f, 0.0f, 1.0f},
+        {0.0f, 1.0f, 2.0f}, {0.0f, 0.1f, 2.0f},
+        {0.0f, 1.0f, 1.0f}, {0.0f, 1.0f, 1.0f},
+        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
+        {40.0f, 160.0f, 600.0f}, {200.0f, 1200.0f, 8000.0f},
+        {0.25f, 0.75f, 8.0f}, {1500.0f, 6800.0f, 18000.0f}
     };
     uint64_t nonFinite = 0;
     double peak = 0.0;
@@ -890,7 +895,7 @@ static bool test_parameter_sweep() {
         }
     }
     const bool ok = renders == synth::kParamCount * 3u && nonFinite == 0 &&
-                    peak <= 8.0 && synth_engine_version() == 17;
+                    peak <= 8.0 && synth_engine_version() == 30;
     std::printf("%s 19 parameter sweep: renders=%u nan_inf=%llu peak=%.9f limit=8.000000 version=%u\n",
                 ok ? "PASS" : "FAIL", renders,
                 static_cast<unsigned long long>(nonFinite), peak, synth_engine_version());
@@ -1458,7 +1463,7 @@ static bool test_m1b_performance() {
 static bool test_curve_zero_golden_and_metadata() {
     const uint32_t count = synth_param_count();
     std::vector<SynthParamInfo> parameters(count);
-    bool metadataValid = count == 113;
+    bool metadataValid = count == 125;
     for (uint32_t id = 0; id < count; ++id) {
         SynthParamInfo& parameter = parameters[id];
         metadataValid = metadataValid && synth_param_info(id, &parameter) == 0;
@@ -1976,10 +1981,10 @@ static bool test_modulation_destinations() {
     constexpr uint32_t sampleRate = 48000;
     constexpr uint32_t frames = 48000;
     constexpr uint32_t fftSize = 8192;
-    double rmsDb[13]{};
-    double centroidPercent[13]{};
+    double rmsDb[15]{};
+    double centroidPercent[15]{};
     bool ok = true;
-    for (uint32_t destination = 1; destination <= 13; ++destination) {
+    for (uint32_t destination = 1; destination <= 15; ++destination) {
         std::vector<Parameters> base = modulation_analysis_params();
         base.insert(base.end(), {{0, 0.0f}, {1, 0.2f}, {2, 1.0f}, {7, 0.2f},
             {17, 0.0f}, {18, 0.2f}, {19, 0.0f}, {46, 2.0f}, {47, 0.0f}, {52, 0.25f}});
@@ -2004,6 +2009,9 @@ static bool test_modulation_destinations() {
         if (destination == 12) {
             base.insert(base.end(), {{46, 0.5f}, {47, 4.0f}, {51, 1.0f}, {52, 0.0f}});
         }
+        if (destination == 15) {
+            base.insert(base.end(), {{2, 0.0f}, {17, 2.0f}, {19, 1.0f}});
+        }
         const std::vector<TimedEvent> events = {{0, SYNTH_EV_NOTE_ON, 620u + destination, 48.0f, 1.0f}};
         const StereoRender reference = render_stereo(sampleRate, 128, frames, events, base, 241u);
         add_mod_slot(base, 0, 1, destination, 1.0f);
@@ -2019,12 +2027,26 @@ static bool test_modulation_destinations() {
             (std::fabs(rmsDb[destination - 1]) >= 1.0 ||
              centroidPercent[destination - 1] >= 5.0);
     }
+    std::vector<Parameters> clampedBase = modulation_analysis_params();
+    clampedBase.insert(clampedBase.end(), {
+        {0, 1.0f}, {2, 0.8f}, {73, 1.0f}, {117, 0.75f}});
+    add_mod_slot(clampedBase, 0, 6, 14, 0.5f);
+    const StereoRender clampedHalf = render_stereo(
+        sampleRate, 128, frames,
+        {{0, SYNTH_EV_NOTE_ON, 699, 60.0f, 1.0f}}, clampedBase, 243u);
+    clampedBase.push_back({57, 1.0f});
+    const StereoRender clampedFull = render_stereo(
+        sampleRate, 128, frames,
+        {{0, SYNTH_EV_NOTE_ON, 699, 60.0f, 1.0f}}, clampedBase, 243u);
+    const size_t clampMismatches = bit_mismatches(clampedHalf.left, clampedFull.left) +
+        bit_mismatches(clampedHalf.right, clampedFull.right);
+    ok = ok && clampMismatches == 0;
     std::printf("%s 44 destinations:", ok ? "PASS" : "FAIL");
-    for (uint32_t destination = 1; destination <= 13; ++destination) {
+    for (uint32_t destination = 1; destination <= 15; ++destination) {
         std::printf(" d%u=%.3fdB/%.2f%%", destination,
                     rmsDb[destination - 1], centroidPercent[destination - 1]);
     }
-    std::printf("\n");
+    std::printf(" warp_clamp_mismatches=%zu\n", clampMismatches);
     return ok;
 }
 
@@ -2679,7 +2701,7 @@ static bool test_builtin_wavetable_palette() {
             largestPeakError, std::fabs(lastPeak / firstPeak - 1.0));
     }
     const bool ok = selectorsDiscrete && framesValid && finite && smallestDifferenceRms >= 0.25 &&
-                    largestPeakError <= 1.0e-5 && synth_engine_version() == 17;
+                    largestPeakError <= 1.0e-5 && synth_engine_version() == 30;
     std::printf("%s 61 builtin wavetable palette: slots=4 frames=4 selectors=integer min_endpoint_diff_rms=%.6f max_peak_error=%.9f version=%u\n",
                 ok ? "PASS" : "FAIL", smallestDifferenceRms, largestPeakError,
                 synth_engine_version());
@@ -2803,13 +2825,13 @@ static bool test_realtime_control_smoothing() {
     SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 128);
     if (engine == nullptr) return false;
     constexpr uint32_t ids[synth::kControlSmoothingCount] = {
-        1u, 2u, 7u, 18u, 19u, 28u, 29u, 32u
+        1u, 2u, 7u, 18u, 19u, 28u, 29u, 32u, 115u, 116u, 117u, 118u
     };
     constexpr float baseline[synth::kControlSmoothingCount] = {
-        0.1f, 0.2f, 0.2f, 0.1f, 0.2f, 0.1f, 0.2f, 0.2f
+        0.1f, 0.2f, 0.2f, 0.1f, 0.2f, 0.1f, 0.2f, 0.2f, 0.1f, 0.1f, -0.2f, 0.2f
     };
     constexpr float target[synth::kControlSmoothingCount] = {
-        0.9f, 0.9f, 0.9f, 0.9f, 0.9f, 0.9f, 0.9f, 0.9f
+        0.9f, 0.9f, 0.9f, 0.9f, 0.9f, 0.9f, 0.9f, 0.9f, 0.9f, 0.9f, 0.8f, -0.8f
     };
     bool idleSnaps = true;
     for (uint32_t i = 0; i < synth::kControlSmoothingCount; ++i) {
@@ -2846,9 +2868,303 @@ static bool test_realtime_control_smoothing() {
     }
     const bool ok = idleSnaps && holdsPrevious && firstStepBounded &&
                     maximumSettledError <= 0.0001;
-    std::printf("%s 63 realtime control smoothing: controls=8 first_ratio=%.9f..%.9f settled_max_error=%.9f idle_snap=%u\n",
-                ok ? "PASS" : "FAIL", minimumFirstRatio, maximumFirstRatio,
+    std::printf("%s 63 realtime control smoothing: controls=%u first_ratio=%.9f..%.9f settled_max_error=%.9f idle_snap=%u\n",
+                ok ? "PASS" : "FAIL", synth::kControlSmoothingCount,
+                minimumFirstRatio, maximumFirstRatio,
                 maximumSettledError, idleSnaps ? 1u : 0u);
+    return ok;
+}
+
+static bool test_live_envelope_control_smoothing() {
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 128u);
+    if (engine == nullptr ||
+        synth_set_param(engine, 0u, 1.0f) != 0 ||
+        synth_set_param(engine, 2u, 0.8f) != 0 ||
+        synth_set_param(engine, 3u, 0.0f) != 0 ||
+        synth_set_param(engine, 4u, 0.0f) != 0 ||
+        synth_set_param(engine, 5u, 0.2f) != 0 ||
+        synth_set_param(engine, 6u, 1.0f) != 0 ||
+        synth_set_param(engine, 7u, 0.2f) != 0 ||
+        synth_set_param(engine, 35u, 1.0f) != 0 ||
+        synth_set_param(engine, 36u, 0.0f) != 0 ||
+        synth_set_param(engine, 37u, 800.0f) != 0 ||
+        synth_set_param(engine, 38u, 0.2f) != 0 ||
+        synth_set_param(engine, 40u, 0.0f) != 0 ||
+        synth_set_param(engine, 41u, 0.0f) != 0 ||
+        synth_set_param(engine, 42u, 0.0f) != 0 ||
+        synth_set_param(engine, 43u, 0.2f) != 0 ||
+        synth_set_param(engine, 44u, 1.0f) != 0) return false;
+
+    float left[128]{};
+    float right[128]{};
+    const SynthEvent firstNote{0u, SYNTH_EV_NOTE_ON, 907u, 60.0f, 1.0f};
+    if (synth_process(engine, &firstNote, 1u, left, right, 2u) != 0) return false;
+    synth::Voice* const held = &engine->voices[0];
+    const bool settledBeforeChange = held->stage == synth::kEnvSustain &&
+        held->filterStage == synth::kEnvSustain &&
+        held->ampSustainSmoothed == 0.2f && held->filterEnvAmountSmoothed == 0.0f &&
+        held->filterSustainSmoothed == 0.2f;
+
+    if (synth_set_param(engine, 5u, 0.8f) != 0 ||
+        synth_set_param(engine, 40u, 4.0f) != 0 ||
+        synth_set_param(engine, 43u, 0.8f) != 0) return false;
+    const bool holdsPrevious = held->ampSustainSmoothed == 0.2f &&
+        held->filterEnvAmountSmoothed == 0.0f && held->filterSustainSmoothed == 0.2f;
+
+    const SynthEvent secondNote{0u, SYNTH_EV_NOTE_ON, 908u, 67.0f, 1.0f};
+    if (synth_process(engine, &secondNote, 1u, left, right, 1u) != 0) return false;
+    const float ampFirst = held->ampSustainSmoothed;
+    const float amountFirst = held->filterEnvAmountSmoothed;
+    const float filterFirst = held->filterSustainSmoothed;
+    synth::Voice* const fresh = &engine->voices[1];
+    const bool newNoteUsesCurrentTargets = fresh->active != 0u &&
+        fresh->ampSustainSmoothed == 0.8f && fresh->filterEnvAmountSmoothed == 4.0f &&
+        fresh->filterSustainSmoothed == 0.8f;
+
+    if (!process_empty_frames(engine, 2399u)) return false;
+    const double ampRatio = (static_cast<double>(ampFirst) - 0.2) / 0.6;
+    const double amountRatio = static_cast<double>(amountFirst) / 4.0;
+    const double filterRatio = (static_cast<double>(filterFirst) - 0.2) / 0.6;
+    const double maximumSettledRatio = std::max(
+        std::max(std::fabs(static_cast<double>(held->ampSustainSmoothed) - 0.8) / 0.6,
+                 std::fabs(static_cast<double>(held->filterEnvAmountSmoothed) - 4.0) / 4.0),
+        std::fabs(static_cast<double>(held->filterSustainSmoothed) - 0.8) / 0.6);
+    const bool envelopesFollowTargets = std::fabs(held->envelope - held->ampSustainSmoothed) <= 1.0e-6f &&
+        std::fabs(held->filterEnvelope - held->filterSustainSmoothed) <= 1.0e-6f;
+    const bool finite = std::isfinite(left[0]) && std::isfinite(right[0]);
+    const bool boundedFirstStep = ampRatio > 0.003 && ampRatio < 0.006 &&
+        amountRatio > 0.003 && amountRatio < 0.006 &&
+        filterRatio > 0.003 && filterRatio < 0.006;
+    const bool ok = settledBeforeChange && holdsPrevious && boundedFirstStep &&
+        newNoteUsesCurrentTargets && maximumSettledRatio <= 0.0001 &&
+        envelopesFollowTargets && finite;
+    std::printf("%s 75 live envelope control smoothing: first_ratio=%.9f/%.9f/%.9f settled_max_ratio=%.9f new_note_direct=%u finite=%u\n",
+                ok ? "PASS" : "FAIL", ampRatio, amountRatio, filterRatio,
+                maximumSettledRatio, newNoteUsesCurrentTargets ? 1u : 0u, finite ? 1u : 0u);
+    return ok;
+}
+
+static bool test_filter_bypass_smoothing() {
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 128u);
+    if (engine == nullptr ||
+        synth_set_param(engine, 0u, 1.0f) != 0 ||
+        synth_set_param(engine, 2u, 0.8f) != 0 ||
+        synth_set_param(engine, 7u, 0.2f) != 0 ||
+        synth_set_param(engine, 35u, 0.0f) != 0 ||
+        synth_set_param(engine, 37u, 800.0f) != 0 ||
+        synth_set_param(engine, 38u, 0.5f) != 0) return false;
+
+    float left[128]{};
+    float right[128]{};
+    const SynthEvent note{0u, SYNTH_EV_NOTE_ON, 906u, 60.0f, 1.0f};
+    if (synth_process(engine, &note, 1u, left, right, 1u) != 0) return false;
+    synth::Voice* voice = &engine->voices[0];
+    const bool startsBypassed = voice->active != 0u && voice->filterMix == 0.0f;
+
+    if (synth_set_param(engine, 35u, 1.0f) != 0 ||
+        synth_process(engine, nullptr, 0u, left, right, 1u) != 0) return false;
+    const float enableFirst = voice->filterMix;
+    if (!process_empty_frames(engine, 2399u)) return false;
+    const float enableSettled = voice->filterMix;
+
+    if (synth_set_param(engine, 35u, 0.0f) != 0 ||
+        synth_process(engine, nullptr, 0u, left, right, 1u) != 0) return false;
+    const float disableFirst = voice->filterMix;
+    if (!process_empty_frames(engine, 2399u)) return false;
+    const float disableSettled = voice->filterMix;
+    if (!process_empty_frames(engine, 2400u)) return false;
+    const bool statesCleared = voice->filter[0][0].ic1 == 0.0 &&
+                               voice->filter[0][0].ic2 == 0.0 &&
+                               voice->filter[1][1].ic1 == 0.0 &&
+                               voice->filter[1][1].ic2 == 0.0;
+
+    synth_reset(engine, SYNTH_RESET_VOICES, 311u);
+    if (synth_set_param(engine, 35u, 1.0f) != 0 ||
+        synth_process(engine, &note, 1u, left, right, 1u) != 0) return false;
+    const bool enabledBeforeNoteIsImmediate = engine->voices[0].filterMix == 1.0f;
+    const bool finite = std::isfinite(left[0]) && std::isfinite(right[0]);
+    const bool ok = startsBypassed && enableFirst > 0.003f && enableFirst < 0.006f &&
+                    std::fabs(enableSettled - 1.0f) <= 0.0001f &&
+                    disableFirst > 0.994f && disableFirst < 0.997f &&
+                    disableSettled <= 0.0001f && statesCleared &&
+                    enabledBeforeNoteIsImmediate && finite;
+    std::printf("%s 74 filter bypass smoothing: on_first=%.9f on_settled=%.9f off_first=%.9f off_settled=%.9f states_cleared=%u static_on=%u finite=%u\n",
+                ok ? "PASS" : "FAIL", enableFirst, enableSettled, disableFirst,
+                disableSettled, statesCleared ? 1u : 0u,
+                enabledBeforeNoteIsImmediate ? 1u : 0u, finite ? 1u : 0u);
+    return ok;
+}
+
+static bool test_filter_mode_smoothing() {
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 128u);
+    if (engine == nullptr ||
+        synth_set_param(engine, 0u, 1.0f) != 0 ||
+        synth_set_param(engine, 2u, 0.8f) != 0 ||
+        synth_set_param(engine, 3u, 0.0f) != 0 ||
+        synth_set_param(engine, 4u, 0.0f) != 0 ||
+        synth_set_param(engine, 5u, 1.0f) != 0 ||
+        synth_set_param(engine, 6u, 1.0f) != 0 ||
+        synth_set_param(engine, 7u, 0.2f) != 0 ||
+        synth_set_param(engine, 35u, 1.0f) != 0 ||
+        synth_set_param(engine, 36u, 0.0f) != 0 ||
+        synth_set_param(engine, 37u, 800.0f) != 0 ||
+        synth_set_param(engine, 38u, 0.5f) != 0) return false;
+
+    float left[128]{};
+    float right[128]{};
+    const SynthEvent note{0u, SYNTH_EV_NOTE_ON, 910u, 60.0f, 1.0f};
+    if (synth_process(engine, &note, 1u, left, right, 1u) != 0) return false;
+    synth::Voice* voice = &engine->voices[0];
+    const bool startsDirect = voice->active != 0u && voice->filterMode == 0u &&
+        voice->filterTransitionMode == 0u && voice->filterPendingMode == 0u &&
+        voice->filterModeMix == 1.0f;
+
+    const uint32_t targetModes[] = {4u, 1u, 5u, 2u, 3u};
+    uint32_t previousMode = 0u;
+    float minimumFirstRatio = 1.0f;
+    float maximumFirstRatio = 0.0f;
+    bool transitionsStartBounded = true;
+    bool transitionsSettle = true;
+    bool finite = std::isfinite(left[0]) && std::isfinite(right[0]);
+    for (const uint32_t targetMode : targetModes) {
+        if (synth_set_param(engine, 36u, static_cast<float>(targetMode)) != 0 ||
+            synth_process(engine, nullptr, 0u, left, right, 1u) != 0) return false;
+        minimumFirstRatio = std::min(minimumFirstRatio, voice->filterModeMix);
+        maximumFirstRatio = std::max(maximumFirstRatio, voice->filterModeMix);
+        transitionsStartBounded = transitionsStartBounded && voice->filterMode == previousMode &&
+            voice->filterTransitionMode == targetMode && voice->filterPendingMode == targetMode &&
+            voice->filterModeMix > 0.003f && voice->filterModeMix < 0.006f;
+        finite = finite && std::isfinite(left[0]) && std::isfinite(right[0]);
+        if (!process_empty_frames(engine, 4800u)) return false;
+        transitionsSettle = transitionsSettle && voice->filterMode == targetMode &&
+            voice->filterTransitionMode == targetMode && voice->filterPendingMode == targetMode &&
+            voice->filterModeMix == 1.0f;
+        previousMode = targetMode;
+    }
+
+    if (synth_set_param(engine, 36u, 0.0f) != 0 ||
+        synth_process(engine, nullptr, 0u, left, right, 1u) != 0 ||
+        synth_set_param(engine, 36u, 4.0f) != 0 ||
+        synth_process(engine, nullptr, 0u, left, right, 1u) != 0) return false;
+    const bool rapidRetargetQueued = voice->filterMode == 3u &&
+        voice->filterTransitionMode == 0u && voice->filterPendingMode == 4u &&
+        voice->filterModeMix > 0.003f && voice->filterModeMix < 0.009f;
+    if (!process_empty_frames(engine, 9600u)) return false;
+    const bool rapidRetargetSettled = voice->filterMode == 4u &&
+        voice->filterTransitionMode == 4u && voice->filterPendingMode == 4u &&
+        voice->filterModeMix == 1.0f;
+
+    synth_reset(engine, SYNTH_RESET_VOICES, 912u);
+    if (synth_set_param(engine, 36u, 0.0f) != 0 ||
+        synth_set_param(engine, 55u, 1.0f) != 0 ||
+        synth_set_param(engine, 56u, 1.0f) != 0 ||
+        synth_set_param(engine, 57u, 0.1f) != 0 ||
+        synth_process(engine, &note, 1u, left, right, 1u) != 0 ||
+        synth_set_param(engine, 36u, 5.0f) != 0 ||
+        synth_process(engine, nullptr, 0u, left, right, 1u) != 0) return false;
+    voice = &engine->voices[0];
+    const bool matrixPathUsesTransition = voice->filterMode == 0u &&
+        voice->filterTransitionMode == 5u && voice->filterPendingMode == 5u &&
+        voice->filterModeMix > 0.003f && voice->filterModeMix < 0.006f &&
+        std::isfinite(left[0]) && std::isfinite(right[0]);
+
+    const bool ok = startsDirect && transitionsStartBounded && transitionsSettle &&
+        rapidRetargetQueued && rapidRetargetSettled && matrixPathUsesTransition && finite;
+    std::printf("%s 76 filter mode smoothing: first_ratio=%.9f..%.9f direct=%u modes=5 rapid=%u matrix=%u finite=%u\n",
+                ok ? "PASS" : "FAIL", minimumFirstRatio, maximumFirstRatio,
+                startsDirect ? 1u : 0u, rapidRetargetSettled ? 1u : 0u,
+                matrixPathUsesTransition ? 1u : 0u, finite ? 1u : 0u);
+    return ok;
+}
+
+static bool test_mono_legato_glide() {
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 128u);
+    if (engine == nullptr ||
+        synth_set_param(engine, 0u, 1.0f) != 0 ||
+        synth_set_param(engine, 2u, 0.8f) != 0 ||
+        synth_set_param(engine, 3u, 0.0f) != 0 ||
+        synth_set_param(engine, 4u, 0.02f) != 0 ||
+        synth_set_param(engine, 5u, 0.7f) != 0 ||
+        synth_set_param(engine, 6u, 0.01f) != 0 ||
+        synth_set_param(engine, 7u, 0.2f) != 0 ||
+        synth_set_param(engine, 8u, 16.0f) != 0 ||
+        synth_set_param(engine, 113u, 1.0f) != 0 ||
+        synth_set_param(engine, 114u, 0.1f) != 0) return false;
+
+    float left = 0.0f;
+    float right = 0.0f;
+    const SynthEvent c{0u, SYNTH_EV_NOTE_ON, 1001u, 60.0f, 0.8f};
+    const SynthEvent g{0u, SYNTH_EV_NOTE_ON, 1002u, 67.0f, 0.7f};
+    const SynthEvent offG{0u, SYNTH_EV_NOTE_OFF, 1002u, 0.0f, 0.0f};
+    const SynthEvent offC{0u, SYNTH_EV_NOTE_OFF, 1001u, 0.0f, 0.0f};
+    synth_reset(engine, SYNTH_RESET_VOICES, 1001u);
+    if (synth_process(engine, &c, 1u, &left, &right, 1u) != 0) return false;
+    synth::Voice* voice = &engine->voices[0];
+    const double cFrequency = voice->baseFrequency;
+    if (!process_empty_frames(engine, 240u)) return false;
+    const float envelopeBeforeGlide = voice->envelope;
+    const uint32_t stageBeforeGlide = voice->stage;
+    if (synth_process(engine, &g, 1u, &left, &right, 1u) != 0) return false;
+    const double gTarget = voice->targetBaseFrequency;
+    const double glideStart = voice->baseFrequency;
+    const bool monoStarts = voice->active != 0u && voice->noteId == 1002u &&
+        engine->monoHeldNoteCount == 2u && cFrequency < glideStart && glideStart < gTarget;
+    const bool monoGlideKeepsEnvelope = voice->stage == stageBeforeGlide &&
+        voice->envelope <= envelopeBeforeGlide + 0.0001f;
+    if (!process_empty_frames(engine, 4800u)) return false;
+    const double glideSettled = voice->baseFrequency;
+    if (synth_process(engine, &offG, 1u, &left, &right, 1u) != 0) return false;
+    const bool fallback = voice->active != 0u && voice->noteId == 1001u &&
+        engine->monoHeldNoteCount == 1u && voice->targetBaseFrequency < voice->baseFrequency;
+    if (synth_process(engine, &offC, 1u, &left, &right, 1u) != 0) return false;
+    const bool finalRelease = engine->monoHeldNoteCount == 0u &&
+        voice->stage == synth::kEnvRelease;
+
+    synth_reset(engine, SYNTH_RESET_VOICES, 1002u);
+    if (synth_set_param(engine, 113u, 2.0f) != 0 ||
+        synth_process(engine, &c, 1u, &left, &right, 1u) != 0 ||
+        !process_empty_frames(engine, 240u)) return false;
+    const float envelopeBeforeLegato = engine->voices[0].envelope;
+    if (synth_process(engine, &g, 1u, &left, &right, 1u) != 0) return false;
+    const bool legatoKeepsEnvelope = engine->voices[0].noteId == 1002u &&
+        engine->voices[0].envelope <= envelopeBeforeLegato + 0.0001f;
+
+    synth_reset(engine, SYNTH_RESET_VOICES, 1003u);
+    if (synth_set_param(engine, 113u, 1.0f) != 0 ||
+        synth_set_param(engine, 114u, 0.0f) != 0 ||
+        synth_process(engine, &c, 1u, &left, &right, 1u) != 0 ||
+        !process_empty_frames(engine, 240u)) return false;
+    const float envelopeBeforeRetrigger = engine->voices[0].envelope;
+    if (synth_process(engine, &g, 1u, &left, &right, 1u) != 0) return false;
+    const bool zeroGlideRetriggers = engine->voices[0].envelope > envelopeBeforeRetrigger + 0.001f &&
+        engine->voices[0].baseFrequency == engine->voices[0].targetBaseFrequency;
+
+    synth_reset(engine, SYNTH_RESET_VOICES, 1004u);
+    if (synth_set_param(engine, 113u, 0.0f) != 0 ||
+        synth_process(engine, &c, 1u, &left, &right, 1u) != 0 ||
+        synth_process(engine, &g, 1u, &left, &right, 1u) != 0) return false;
+    uint32_t activePolyVoices = 0;
+    for (uint32_t i = 0; i < engine->voiceLimit; ++i)
+        activePolyVoices += engine->voices[i].active != 0u ? 1u : 0u;
+    const bool polyUnchanged = activePolyVoices == 2u && engine->monoHeldNoteCount == 0u;
+    const bool finite = std::isfinite(left) && std::isfinite(right) &&
+        std::isfinite(glideStart) && std::isfinite(glideSettled) &&
+        glideSettled > glideStart && glideSettled < gTarget &&
+        (gTarget - glideSettled) < (gTarget - cFrequency) * 0.4;
+    const bool ok = monoStarts && monoGlideKeepsEnvelope && zeroGlideRetriggers && fallback &&
+        finalRelease && legatoKeepsEnvelope && polyUnchanged && finite;
+    std::printf("%s 77 mono/legato/glide: mono=%u smooth=%u retrigger0=%u fallback=%u release=%u legato=%u poly=%u "
+                "start_hz=%.6f settled_hz=%.6f target_hz=%.6f finite=%u\n",
+                ok ? "PASS" : "FAIL", monoStarts ? 1u : 0u,
+                monoGlideKeepsEnvelope ? 1u : 0u, zeroGlideRetriggers ? 1u : 0u,
+                fallback ? 1u : 0u,
+                finalRelease ? 1u : 0u, legatoKeepsEnvelope ? 1u : 0u,
+                polyUnchanged ? 1u : 0u, glideStart, glideSettled, gTarget,
+                finite ? 1u : 0u);
     return ok;
 }
 
@@ -2943,6 +3259,417 @@ static bool test_unison_phase_and_width_curves() {
     std::printf("%s 65 unison phase/width: phase4=-3/16,-1/16,+1/16,+3/16 mean_error=%.3g width_mid=%.6f->%.6f seed_mismatches=%zu\n",
                 ok ? "PASS" : "FAIL", phaseMeanError, linearMid, naturalMid,
                 seedMismatch);
+    return ok;
+}
+
+static bool test_unison_density() {
+    bool symmetric = true;
+    bool unitEnergy = true;
+    bool monotonicOuter = true;
+    double maximumEnergyError = 0.0;
+    double previousOuter = -1.0;
+    for (uint32_t step = 0; step <= 100; ++step) {
+        const float density = synth::kUnisonDensityMaximum *
+            static_cast<float>(step) / 100.0f;
+        const float normalization = synth::unison_density_normalization(4u, density);
+        double gains[4]{};
+        double energy = 0.0;
+        for (uint32_t index = 0; index < 4u; ++index) {
+            gains[index] = static_cast<double>(normalization) *
+                static_cast<double>(synth::unison_density_weight(index, 4u, density));
+            energy += gains[index] * gains[index];
+        }
+        maximumEnergyError = std::max(maximumEnergyError, std::fabs(energy - 1.0));
+        unitEnergy = unitEnergy && std::fabs(energy - 1.0) < 1.0e-5;
+        symmetric = symmetric && gains[0] == gains[3] && gains[1] == gains[2];
+        monotonicOuter = monotonicOuter && gains[0] >= previousOuter;
+        previousOuter = gains[0];
+    }
+    const float focusedNormalization = synth::unison_density_normalization(4u, 0.0f);
+    const bool focusedPair = synth::unison_density_weight(0u, 4u, 0.0f) == 0.0f &&
+        synth::unison_density_weight(3u, 4u, 0.0f) == 0.0f &&
+        std::fabs(static_cast<double>(focusedNormalization) - std::sqrt(0.5)) < 1.0e-7;
+    const bool fullExact = synth::unison_density_normalization(4u, 1.0f) == 0.5f &&
+        synth::unison_density_weight(0u, 4u, 1.0f) == 1.0f &&
+        synth::unison_density_weight(3u, 4u, 1.0f) == 1.0f;
+    const float wideNormalization = synth::unison_density_normalization(
+        4u, synth::kUnisonDensityMaximum);
+    const float wideOuterGain = wideNormalization * synth::unison_density_weight(
+        0u, 4u, synth::kUnisonDensityMaximum);
+    const double wideEffective = 2.0 + 2.0 *
+        static_cast<double>(synth::kUnisonDensityMaximum) *
+        static_cast<double>(synth::kUnisonDensityMaximum);
+    const bool wideMapping = std::fabs(wideEffective - 5.0) < 1.0e-6 &&
+        wideOuterGain > wideNormalization;
+    bool lowerCountsUnchanged = true;
+    for (uint32_t count = 1u; count < 4u; ++count) {
+        lowerCountsUnchanged = lowerCountsUnchanged &&
+            synth::unison_density_normalization(count, 0.0f) ==
+                synth::unison_normalization(count);
+        for (uint32_t index = 0; index < count; ++index)
+            lowerCountsUnchanged = lowerCountsUnchanged &&
+                synth::unison_density_weight(index, count, 0.0f) == 1.0f;
+    }
+
+    std::vector<Parameters> parameters = clean_analysis_params();
+    parameters.insert(parameters.end(), {
+        {9u, 4.0f}, {10u, 24.0f}, {11u, 1.0f}, {15u, 2.0f}, {76u, 1.0f}
+    });
+    const std::vector<TimedEvent> events = {
+        {0u, SYNTH_EV_NOTE_ON, 503u, 60.0f, 1.0f}
+    };
+    parameters.push_back({115u, 0.0f});
+    const StereoRender focused = render_stereo(
+        48000u, 128u, 48000u, events, parameters, 227u);
+    parameters.back().value = 1.0f;
+    const StereoRender full = render_stereo(
+        48000u, 128u, 48000u, events, parameters, 227u);
+    parameters.back().value = synth::kUnisonDensityMaximum;
+    const StereoRender wide = render_stereo(
+        48000u, 128u, 48000u, events, parameters, 227u);
+    const size_t audibleDifference = bit_mismatches(focused.left, full.left) +
+        bit_mismatches(focused.right, full.right) +
+        bit_mismatches(full.left, wide.left) + bit_mismatches(full.right, wide.right);
+    const double levelDifferenceDb = 20.0 * std::log10(
+        stereo_rms(full, 12000u, 24000u) /
+        std::max(stereo_rms(focused, 12000u, 24000u), 1.0e-30));
+    const bool levelStable = std::isfinite(levelDifferenceDb) &&
+        std::fabs(levelDifferenceDb) < 2.0;
+    double fullMidPower = 0.0;
+    double fullSidePower = 0.0;
+    double wideMidPower = 0.0;
+    double wideSidePower = 0.0;
+    for (size_t i = 12000u; i < 36000u; ++i) {
+        const double fullMid = 0.5 * (static_cast<double>(full.left[i]) + full.right[i]);
+        const double fullSide = 0.5 * (static_cast<double>(full.left[i]) - full.right[i]);
+        const double wideMid = 0.5 * (static_cast<double>(wide.left[i]) + wide.right[i]);
+        const double wideSide = 0.5 * (static_cast<double>(wide.left[i]) - wide.right[i]);
+        fullMidPower += fullMid * fullMid;
+        fullSidePower += fullSide * fullSide;
+        wideMidPower += wideMid * wideMid;
+        wideSidePower += wideSide * wideSide;
+    }
+    const double fullSideToMid = std::sqrt(fullSidePower / fullMidPower);
+    const double wideSideToMid = std::sqrt(wideSidePower / wideMidPower);
+    const double monoLevelDifferenceDb = 10.0 * std::log10(wideMidPower / fullMidPower);
+    const bool wideStereo = std::isfinite(fullSideToMid) && std::isfinite(wideSideToMid) &&
+        wideSideToMid > fullSideToMid;
+    const bool monoStable = std::isfinite(monoLevelDifferenceDb) &&
+        std::fabs(monoLevelDifferenceDb) < 1.0;
+    const bool ok = symmetric && unitEnergy && monotonicOuter && focusedPair &&
+        fullExact && wideMapping && lowerCountsUnchanged && audibleDifference > 0u &&
+        levelStable && wideStereo && monoStable;
+    std::printf("%s 78 unison density: effective=2.0..5.0 symmetric=%u energy_max_error=%.9g outer_monotonic=%u full_exact=%u wide_mapping=%u lower_counts_unchanged=%u rms_delta_db=%.6f side_mid=%.6f->%.6f mono_delta_db=%.6f sample_mismatches=%zu\n",
+                ok ? "PASS" : "FAIL", symmetric ? 1u : 0u, maximumEnergyError,
+                monotonicOuter ? 1u : 0u, fullExact ? 1u : 0u,
+                wideMapping ? 1u : 0u, lowerCountsUnchanged ? 1u : 0u, levelDifferenceDb,
+                fullSideToMid, wideSideToMid, monoLevelDifferenceDb,
+                audibleDifference);
+    return ok;
+}
+
+static double warp_alias_ratio_db(bool guardedMip, float mode) {
+    constexpr uint32_t sampleRate = 48000u;
+    constexpr uint32_t fftSize = 4096u;
+    constexpr uint32_t start = 16384u;
+    constexpr float midi = 108.0f;
+    constexpr float amount = 0.75f;
+    const double frequency = 440.0 * std::exp2((static_cast<double>(midi) - 69.0) / 12.0);
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), sampleRate, 128u);
+    if (engine == nullptr) return std::numeric_limits<double>::quiet_NaN();
+    std::vector<float> output(start + fftSize);
+    double phase = 0.0;
+    for (float& sample : output) {
+        const double mipFrequency = guardedMip
+            ? synth::oscillator_warp_frequency(frequency, amount) : frequency;
+        sample = synth::read_wavetable_bandlimited(
+            &engine->wavetable, 1u, 0.5f, mipFrequency, sampleRate,
+            synth::oscillator_warp_phase(phase, amount, mode));
+        phase += frequency / sampleRate;
+        phase -= static_cast<uint64_t>(phase);
+    }
+    const std::vector<double> power = spectrum_power(output, start, fftSize, true);
+    const double fundamentalBin = frequency * fftSize / sampleRate;
+    double expectedPower = 0.0;
+    double aliasPower = 0.0;
+    for (uint32_t bin = 1; bin < power.size(); ++bin) {
+        bool expected = bin <= 8u;
+        for (uint32_t harmonic = 1u;
+             static_cast<double>(harmonic) * fundamentalBin < power.size(); ++harmonic) {
+            if (std::fabs(static_cast<double>(bin) - harmonic * fundamentalBin) <= 8.0) {
+                expected = true;
+                break;
+            }
+        }
+        if (expected) expectedPower += power[bin];
+        else aliasPower += power[bin];
+    }
+    return 10.0 * std::log10(aliasPower / expectedPower);
+}
+
+static bool test_oscillator_bend_warp() {
+    bool finite = true;
+    bool monotonic = true;
+    bool anchors = true;
+    bool derivativeBounded = true;
+    bool identity = true;
+    double minimumDerivative = std::numeric_limits<double>::infinity();
+    double maximumDerivative = -std::numeric_limits<double>::infinity();
+    static constexpr float amounts[] = {-1.0f, -0.75f, 0.0f, 0.75f, 1.0f};
+    for (float amount : amounts) {
+        double previous = -1.0;
+        for (uint32_t index = 0; index <= 4096u; ++index) {
+            const double phase = static_cast<double>(index) / 4096.0;
+            const double warped = synth::oscillator_warp_phase(phase, amount, 0.0f);
+            const double derivative = 1.0 + 0.85 * static_cast<double>(amount) *
+                std::cos(synth::kTwoPi * phase);
+            finite = finite && std::isfinite(warped) && std::isfinite(derivative);
+            monotonic = monotonic && warped + 1.0e-12 >= previous;
+            derivativeBounded = derivativeBounded && derivative >= 0.15 - 1.0e-12 &&
+                derivative <= 1.85 + 1.0e-12;
+            identity = identity && (amount != 0.0f || warped == phase);
+            minimumDerivative = std::min(minimumDerivative, derivative);
+            maximumDerivative = std::max(maximumDerivative, derivative);
+            previous = warped;
+        }
+        anchors = anchors &&
+            std::fabs(synth::oscillator_warp_phase(0.0, amount, 0.0f)) <= 1.0e-12 &&
+            std::fabs(synth::oscillator_warp_phase(0.5, amount, 0.0f) - 0.5) <= 1.0e-12 &&
+            std::fabs(synth::oscillator_warp_phase(1.0, amount, 0.0f) - 1.0) <= 1.0e-12;
+    }
+    const double baseFrequency = 440.0;
+    const bool frequencyContract =
+        synth::oscillator_warp_frequency(baseFrequency, 0.0f) == baseFrequency &&
+        std::fabs(synth::oscillator_warp_frequency(baseFrequency, 0.75f) /
+            baseFrequency - 1.6375) <= 1.0e-12 &&
+        synth::oscillator_warp_frequency(baseFrequency, -0.75f) ==
+            synth::oscillator_warp_frequency(baseFrequency, 0.75f);
+
+    std::vector<Parameters> base = clean_analysis_params();
+    base.insert(base.end(), {{0u, 1.0f}, {1u, 0.5f}, {2u, 1.0f}});
+    std::vector<Parameters> off = base;
+    off.insert(off.end(), {{117u, 0.0f}, {118u, 0.0f}});
+    std::vector<Parameters> negative = base;
+    negative.push_back({117u, -0.75f});
+    std::vector<Parameters> positive = base;
+    positive.push_back({117u, 0.75f});
+    const std::vector<TimedEvent> event = {{0u, SYNTH_EV_NOTE_ON, 506u, 60.0f, 1.0f}};
+    const std::vector<float> baseline = render(48000u, 128u, 16384u, event, base);
+    const std::vector<float> bypass = render(48000u, 128u, 16384u, event, off);
+    const std::vector<float> bendNegative = render(48000u, 128u, 16384u, event, negative);
+    const std::vector<float> bendPositive = render(48000u, 128u, 16384u, event, positive);
+    const size_t offMismatch = bit_mismatches(baseline, bypass);
+    const size_t directionDifference = bit_mismatches(bendNegative, bendPositive);
+    const size_t negativeDifference = bit_mismatches(baseline, bendNegative);
+    const size_t positiveDifference = bit_mismatches(baseline, bendPositive);
+    const double unguardedAlias = warp_alias_ratio_db(false, 0.0f);
+    const double guardedAlias = warp_alias_ratio_db(true, 0.0f);
+    const bool aliasImproved = std::isfinite(unguardedAlias) && std::isfinite(guardedAlias) &&
+        guardedAlias <= unguardedAlias - 3.0;
+    const bool ok = finite && monotonic && anchors && derivativeBounded && identity &&
+        frequencyContract && offMismatch == 0u && directionDifference > 0u &&
+        negativeDifference > 0u && positiveDifference > 0u && aliasImproved;
+    std::printf("%s 79 OSC Bend Warp: monotonic=%u anchors=%u derivative=%.6f..%.6f off_mismatches=%zu direction_mismatches=%zu alias_db=%.6f->%.6f improvement_db=%.6f\n",
+                ok ? "PASS" : "FAIL", monotonic ? 1u : 0u, anchors ? 1u : 0u,
+                minimumDerivative, maximumDerivative, offMismatch, directionDifference,
+                unguardedAlias, guardedAlias, unguardedAlias - guardedAlias);
+    return ok;
+}
+
+static bool test_oscillator_asym_warp() {
+    bool finite = true;
+    bool monotonic = true;
+    bool anchors = true;
+    bool derivativeBounded = true;
+    bool identity = true;
+    double minimumDerivative = std::numeric_limits<double>::infinity();
+    double maximumDerivative = -std::numeric_limits<double>::infinity();
+    static constexpr float amounts[] = {-1.0f, -0.75f, 0.0f, 0.75f, 1.0f};
+    static constexpr float modeMixes[] = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
+    for (float amount : amounts) {
+        for (float modeMix : modeMixes) {
+            double previous = -1.0;
+            for (uint32_t index = 0; index <= 4096u; ++index) {
+                const double phase = static_cast<double>(index) / 4096.0;
+                const double warped = synth::oscillator_warp_phase(phase, amount, modeMix);
+                const double bendDerivative = std::cos(synth::kTwoPi * phase);
+                const double asymDerivative = 1.0 - 2.0 * phase;
+                const double derivative = 1.0 + 0.85 * static_cast<double>(amount) *
+                    ((1.0 - static_cast<double>(modeMix)) * bendDerivative +
+                     static_cast<double>(modeMix) * asymDerivative);
+                finite = finite && std::isfinite(warped) && std::isfinite(derivative);
+                monotonic = monotonic && warped + 1.0e-12 >= previous;
+                derivativeBounded = derivativeBounded && derivative >= 0.15 - 1.0e-12 &&
+                    derivative <= 1.85 + 1.0e-12;
+                identity = identity && (amount != 0.0f || warped == phase);
+                minimumDerivative = std::min(minimumDerivative, derivative);
+                maximumDerivative = std::max(maximumDerivative, derivative);
+                previous = warped;
+            }
+            anchors = anchors &&
+                std::fabs(synth::oscillator_warp_phase(0.0, amount, modeMix)) <= 1.0e-12 &&
+                std::fabs(synth::oscillator_warp_phase(1.0, amount, modeMix) - 1.0) <= 1.0e-12;
+        }
+    }
+    const double negativeMid = synth::oscillator_warp_phase(0.5, -0.75f, 1.0f);
+    const double positiveMid = synth::oscillator_warp_phase(0.5, 0.75f, 1.0f);
+    const bool directionContract = negativeMid < 0.5 && positiveMid > 0.5 &&
+        std::fabs(negativeMid - 0.340625) <= 1.0e-12 &&
+        std::fabs(positiveMid - 0.659375) <= 1.0e-12;
+
+    std::vector<Parameters> base = clean_analysis_params();
+    base.insert(base.end(), {{0u, 1.0f}, {1u, 0.5f}, {2u, 1.0f}});
+    std::vector<Parameters> implicitBend = base;
+    implicitBend.push_back({117u, 0.75f});
+    std::vector<Parameters> explicitBend = implicitBend;
+    explicitBend.push_back({119u, 0.0f});
+    std::vector<Parameters> asymPositive = base;
+    asymPositive.insert(asymPositive.end(), {{117u, 0.75f}, {119u, 1.0f}});
+    std::vector<Parameters> asymNegative = base;
+    asymNegative.insert(asymNegative.end(), {{117u, -0.75f}, {119u, 1.0f}});
+    const std::vector<TimedEvent> event = {{0u, SYNTH_EV_NOTE_ON, 507u, 60.0f, 1.0f}};
+    const std::vector<float> legacy = render(48000u, 128u, 16384u, event, implicitBend);
+    const std::vector<float> bend = render(48000u, 128u, 16384u, event, explicitBend);
+    const std::vector<float> positive = render(48000u, 128u, 16384u, event, asymPositive);
+    const std::vector<float> negative = render(48000u, 128u, 16384u, event, asymNegative);
+    const size_t bendMismatch = bit_mismatches(legacy, bend);
+    const size_t modeDifference = bit_mismatches(bend, positive);
+    const size_t directionDifference = bit_mismatches(negative, positive);
+    const double unguardedAlias = warp_alias_ratio_db(false, 1.0f);
+    const double guardedAlias = warp_alias_ratio_db(true, 1.0f);
+    const bool aliasImproved = std::isfinite(unguardedAlias) && std::isfinite(guardedAlias) &&
+        guardedAlias <= unguardedAlias - 3.0;
+    const bool ok = finite && monotonic && anchors && derivativeBounded && identity &&
+        directionContract && bendMismatch == 0u && modeDifference > 0u &&
+        directionDifference > 0u && aliasImproved;
+    std::printf("%s 80 OSC ASYM Warp: monotonic=%u anchors=%u derivative=%.6f..%.6f midpoint=%.6f/%.6f bend_mismatches=%zu mode_mismatches=%zu direction_mismatches=%zu alias_db=%.6f->%.6f improvement_db=%.6f\n",
+                ok ? "PASS" : "FAIL", monotonic ? 1u : 0u, anchors ? 1u : 0u,
+                minimumDerivative, maximumDerivative, negativeMid, positiveMid,
+                bendMismatch, modeDifference, directionDifference,
+                unguardedAlias, guardedAlias, unguardedAlias - guardedAlias);
+    return ok;
+}
+
+static double sync_alias_ratio_db(bool corrected) {
+    constexpr uint32_t sampleRate = 48000u;
+    constexpr uint32_t fftSize = 4096u;
+    constexpr uint32_t start = 16384u;
+    constexpr float midi = 96.0f;
+    constexpr float amount = 0.75f;
+    const double frequency = 440.0 * std::exp2((static_cast<double>(midi) - 69.0) / 12.0);
+    const double ratio = synth::oscillator_sync_ratio(amount);
+    const double mipFrequency = synth::oscillator_sync_frequency(frequency, amount);
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), sampleRate, 128u);
+    if (engine == nullptr) return std::numeric_limits<double>::quiet_NaN();
+    const double resetPhase = ratio - std::floor(ratio);
+    const float before = synth::read_wavetable_bandlimited(
+        &engine->wavetable, 1u, 0.5f, mipFrequency, sampleRate, resetPhase);
+    const float after = synth::read_wavetable_bandlimited(
+        &engine->wavetable, 1u, 0.5f, mipFrequency, sampleRate, 0.0);
+    std::vector<float> output(start + fftSize);
+    double phase = 0.0;
+    for (float& sample : output) {
+        const double syncPhase = phase * ratio - std::floor(phase * ratio);
+        sample = synth::read_wavetable_bandlimited(
+            &engine->wavetable, 1u, 0.5f, mipFrequency, sampleRate, syncPhase);
+        if (corrected) {
+            sample += static_cast<float>(0.5 * static_cast<double>(after - before) *
+                synth::poly_blep(phase, frequency / sampleRate));
+        }
+        phase += frequency / sampleRate;
+        phase -= std::floor(phase);
+    }
+    const std::vector<double> power = spectrum_power(output, start, fftSize, true);
+    const double fundamentalBin = frequency * fftSize / sampleRate;
+    double expectedPower = 0.0;
+    double aliasPower = 0.0;
+    for (uint32_t bin = 1; bin < power.size(); ++bin) {
+        bool expected = bin <= 8u;
+        for (uint32_t harmonic = 1u;
+             static_cast<double>(harmonic) * fundamentalBin < power.size(); ++harmonic) {
+            if (std::fabs(static_cast<double>(bin) - harmonic * fundamentalBin) <= 8.0) {
+                expected = true;
+                break;
+            }
+        }
+        if (expected) expectedPower += power[bin];
+        else aliasPower += power[bin];
+    }
+    return 10.0 * std::log10(aliasPower / expectedPower);
+}
+
+static bool test_oscillator_sync_warp() {
+    SynthParamInfo modeA{};
+    SynthParamInfo modeB{};
+    const bool metadata = synth_param_info(119u, &modeA) == 0 &&
+        synth_param_info(120u, &modeB) == 0 && modeA.minimum == 0.0f &&
+        modeA.maximum == 2.0f && modeA.defaultValue == 0.0f &&
+        modeB.minimum == 0.0f && modeB.maximum == 2.0f &&
+        (modeA.flags & SYNTH_PARAM_FLAG_INTEGER) != 0u && synth_param_count() == 125u &&
+        synth_engine_version() == 30u;
+    const bool ratios = std::fabs(synth::oscillator_sync_ratio(-1.0f) - 0.25) <= 1.0e-12 &&
+        synth::oscillator_sync_ratio(0.0f) == 1.0 &&
+        std::fabs(synth::oscillator_sync_ratio(1.0f) - 4.0) <= 1.0e-12 &&
+        synth::oscillator_sync_frequency(440.0, -1.0f) == 440.0 &&
+        std::fabs(synth::oscillator_sync_frequency(440.0, 1.0f) - 1760.0) <= 1.0e-12;
+
+    std::vector<Parameters> base = clean_analysis_params();
+    base.insert(base.end(), {{0u, 1.0f}, {1u, 0.5f}, {2u, 1.0f}});
+    std::vector<Parameters> bypass = base;
+    bypass.insert(bypass.end(), {{117u, 0.0f}, {119u, 2.0f}});
+    std::vector<Parameters> positive = base;
+    positive.insert(positive.end(), {{117u, 0.75f}, {119u, 2.0f}});
+    std::vector<Parameters> negative = base;
+    negative.insert(negative.end(), {{117u, -0.75f}, {119u, 2.0f}});
+    const std::vector<TimedEvent> event = {{0u, SYNTH_EV_NOTE_ON, 508u, 60.0f, 1.0f}};
+    const std::vector<float> baseline = render(48000u, 128u, 16384u, event, base);
+    const std::vector<float> syncBypass = render(48000u, 128u, 16384u, event, bypass);
+    const std::vector<float> syncPositive = render(48000u, 128u, 16384u, event, positive);
+    const std::vector<float> syncNegative = render(48000u, 128u, 16384u, event, negative);
+    const size_t bypassMismatch = bit_mismatches(baseline, syncBypass);
+    const size_t positiveDifference = bit_mismatches(baseline, syncPositive);
+    const size_t directionDifference = bit_mismatches(syncNegative, syncPositive);
+
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 128u);
+    if (engine == nullptr || synth_set_param(engine, 117u, 0.75f) != 0 ||
+        synth_set_param(engine, 119u, 0.0f) != 0) return false;
+    const bool idleOneHot = engine->warpModeSmoothed[0][0] == 1.0 &&
+        engine->warpModeSmoothed[0][1] == 0.0 && engine->warpModeSmoothed[0][2] == 0.0;
+    const SynthEvent note{0u, SYNTH_EV_NOTE_ON, 509u, 60.0f, 1.0f};
+    float left[128]{};
+    float right[128]{};
+    if (synth_process(engine, &note, 1u, left, right, 1u) != 0 ||
+        synth_set_param(engine, 119u, 2.0f) != 0 ||
+        synth_process(engine, nullptr, 0u, left, right, 1u) != 0) return false;
+    const double firstSum = engine->warpModeSmoothed[0][0] +
+        engine->warpModeSmoothed[0][1] + engine->warpModeSmoothed[0][2];
+    const bool directTransition = std::fabs(firstSum - 1.0) <= 1.0e-12 &&
+        engine->warpModeSmoothed[0][0] > 0.99 && engine->warpModeSmoothed[0][1] == 0.0 &&
+        engine->warpModeSmoothed[0][2] > 0.003 && engine->warpModeSmoothed[0][2] < 0.006;
+    if (!process_empty_frames(engine, 2399u)) return false;
+    const double settledSum = engine->warpModeSmoothed[0][0] +
+        engine->warpModeSmoothed[0][1] + engine->warpModeSmoothed[0][2];
+    const bool settled = std::fabs(settledSum - 1.0) <= 1.0e-12 &&
+        engine->warpModeSmoothed[0][0] <= 0.0001 &&
+        engine->warpModeSmoothed[0][1] == 0.0 &&
+        engine->warpModeSmoothed[0][2] >= 0.9999;
+
+    const double naiveAlias = sync_alias_ratio_db(false);
+    const double correctedAlias = sync_alias_ratio_db(true);
+    const bool aliasImproved = std::isfinite(naiveAlias) && std::isfinite(correctedAlias) &&
+        correctedAlias <= naiveAlias - 1.0;
+    const bool finiteOutput = std::all_of(syncPositive.begin(), syncPositive.end(),
+        [](float sample) { return std::isfinite(sample); });
+    const bool ok = metadata && ratios && bypassMismatch == 0u &&
+        positiveDifference > 0u && directionDifference > 0u && idleOneHot &&
+        directTransition && settled && aliasImproved && finiteOutput;
+    std::printf("%s 81 OSC SYNC Warp: ratio=%.2f..%.2f bypass_mismatches=%zu direction_mismatches=%zu one_hot=%.9f/%.9f alias_db=%.6f->%.6f improvement_db=%.6f\n",
+                ok ? "PASS" : "FAIL", synth::oscillator_sync_ratio(-1.0f),
+                synth::oscillator_sync_ratio(1.0f), bypassMismatch, directionDifference,
+                firstSum, settledSum, naiveAlias, correctedAlias, naiveAlias - correctedAlias);
     return ok;
 }
 
@@ -3150,6 +3877,144 @@ static bool test_shared_insert_fx() {
     return ok;
 }
 
+static double eq_gain_db(float midi, float low, float mid, float high,
+                         float lowFrequency = 160.0f, float midFrequency = 1200.0f,
+                         float midQ = 0.75f, float highFrequency = 6800.0f) {
+    constexpr uint32_t frames = 48000u;
+    const std::vector<TimedEvent> events = {
+        {0, SYNTH_EV_NOTE_ON, 711, midi, 0.5f}
+    };
+    std::vector<Parameters> referenceParams = clean_analysis_params();
+    referenceParams.insert(referenceParams.end(), {{99, 1.0f}});
+    std::vector<Parameters> changedParams = referenceParams;
+    changedParams.insert(changedParams.end(), {
+        {100, low}, {101, mid}, {102, high}, {121, lowFrequency},
+        {122, midFrequency}, {123, midQ}, {124, highFrequency}
+    });
+    const StereoRender reference = render_stereo(
+        48000, 128, frames, events, referenceParams, 281u);
+    const StereoRender changed = render_stereo(
+        48000, 128, frames, events, changedParams, 281u);
+    return rms_difference_db(changed, reference, 24000u, 20000u);
+}
+
+static bool test_eq_quality_and_smoothing() {
+    constexpr uint32_t frames = 12000u;
+    const std::vector<TimedEvent> neutralEvents = {
+        {0, SYNTH_EV_NOTE_ON, 712, 60.0f, 0.6f},
+        {8000, SYNTH_EV_NOTE_OFF, 712, 0.0f, 0.0f}
+    };
+    std::vector<Parameters> neutralBase = clean_analysis_params();
+    const StereoRender bypass = render_stereo(
+        48000, 128, frames, neutralEvents, neutralBase, 283u);
+    neutralBase.insert(neutralBase.end(), {{99, 1.0f}});
+    const StereoRender neutral = render_stereo(
+        48000, 128, frames, neutralEvents, neutralBase, 283u);
+    const size_t neutralMismatch = bit_mismatches(bypass.left, neutral.left) +
+                                   bit_mismatches(bypass.right, neutral.right);
+
+    const double lowDb = eq_gain_db(36.0f, 12.0f, 0.0f, 0.0f);
+    const double lowLeakDb = eq_gain_db(84.0f, 12.0f, 0.0f, 0.0f);
+    const double midDb = eq_gain_db(84.0f, 0.0f, 12.0f, 0.0f);
+    const double midLowLeakDb = eq_gain_db(36.0f, 0.0f, 12.0f, 0.0f);
+    const double midHighLeakDb = eq_gain_db(120.0f, 0.0f, 12.0f, 0.0f);
+    const double highDb = eq_gain_db(120.0f, 0.0f, 0.0f, 12.0f);
+    const double highLeakDb = eq_gain_db(84.0f, 0.0f, 0.0f, 12.0f);
+    const double lowAt300With80 = eq_gain_db(62.0f, 12.0f, 0.0f, 0.0f, 80.0f);
+    const double lowAt300With500 = eq_gain_db(62.0f, 12.0f, 0.0f, 0.0f, 500.0f);
+    const double midAt1kWith1k = eq_gain_db(
+        84.0f, 0.0f, 12.0f, 0.0f, 160.0f, 1046.5f);
+    const double midAt1kWith4k = eq_gain_db(
+        84.0f, 0.0f, 12.0f, 0.0f, 160.0f, 4000.0f);
+    const double broadMidAt500 = eq_gain_db(
+        72.0f, 0.0f, 12.0f, 0.0f, 160.0f, 1200.0f, 0.75f);
+    const double narrowMidAt500 = eq_gain_db(
+        72.0f, 0.0f, 12.0f, 0.0f, 160.0f, 1200.0f, 6.0f);
+    const double highAt4kWith3k = eq_gain_db(
+        108.0f, 0.0f, 0.0f, 12.0f, 160.0f, 1200.0f, 0.75f, 3000.0f);
+    const double highAt4kWith12k = eq_gain_db(
+        108.0f, 0.0f, 0.0f, 12.0f, 160.0f, 1200.0f, 0.75f, 12000.0f);
+
+    std::vector<unsigned char> state(synth_state_size());
+    SynthEngine* engine = synth_create(state.data(), state.size(), 48000.0, 1u);
+    bool smoothing = engine != nullptr;
+    float outputLeft = 0.0f;
+    float outputRight = 0.0f;
+    if (smoothing) {
+        (void)synth_set_param(engine, 3u, 0.0f);
+        (void)synth_set_param(engine, 5u, 1.0f);
+        (void)synth_set_param(engine, 7u, 0.05f);
+        (void)synth_set_param(engine, 99u, 1.0f);
+        const SynthEvent note{0, SYNTH_EV_NOTE_ON, 713, 69.0f, 0.5f};
+        smoothing = synth_process(engine, &note, 1u, &outputLeft, &outputRight, 1u) == 0;
+        (void)synth_set_param(engine, 101u, 18.0f);
+        (void)synth_set_param(engine, 122u, 4000.0f);
+        (void)synth_set_param(engine, 123u, 6.0f);
+        smoothing = smoothing && engine->insertFx.eqGainSmoothed[1] == 0.0f &&
+            engine->insertFx.eqFrequencySmoothed[1] == 1200.0f &&
+            engine->insertFx.eqMidQSmoothed == 0.75f &&
+            synth_process(engine, nullptr, 0u, &outputLeft, &outputRight, 1u) == 0;
+        const float firstStep = engine->insertFx.eqGainSmoothed[1];
+        const float firstFrequencyStep = engine->insertFx.eqFrequencySmoothed[1];
+        const float firstQStep = engine->insertFx.eqMidQSmoothed;
+        smoothing = smoothing && firstStep > 0.0f && firstStep < 0.1f &&
+            firstFrequencyStep > 1200.0f && firstFrequencyStep < 1220.0f &&
+            firstQStep > 0.75f && firstQStep < 0.78f;
+        for (uint32_t frame = 1u; frame < 2400u && smoothing; ++frame)
+            smoothing = synth_process(
+                engine, nullptr, 0u, &outputLeft, &outputRight, 1u) == 0;
+        smoothing = smoothing &&
+            synth::absd(static_cast<double>(18.0f - engine->insertFx.eqGainSmoothed[1])) <
+                0.001 &&
+            synth::absd(static_cast<double>(4000.0f - engine->insertFx.eqFrequencySmoothed[1])) <
+                0.2 &&
+            synth::absd(static_cast<double>(6.0f - engine->insertFx.eqMidQSmoothed)) <
+                0.001;
+    }
+
+    std::vector<Parameters> rapidParams = clean_analysis_params();
+    rapidParams.insert(rapidParams.end(), {{7, 0.05f}, {99, 1.0f}});
+    std::vector<TimedEvent> rapidEvents = {
+        {0, SYNTH_EV_NOTE_ON, 714, 48.0f, 0.5f},
+        {8192, SYNTH_EV_NOTE_OFF, 714, 0.0f, 0.0f}
+    };
+    for (uint32_t frame = 256u; frame < 8192u; frame += 64u) {
+        const float gain = ((frame / 64u) & 1u) == 0u ? 18.0f : -18.0f;
+        rapidEvents.push_back({frame, SYNTH_EV_PARAM, 100u, gain, 0.0f});
+        rapidEvents.push_back({frame, SYNTH_EV_PARAM, 101u, -gain, 0.0f});
+        rapidEvents.push_back({frame, SYNTH_EV_PARAM, 102u, gain, 0.0f});
+        rapidEvents.push_back({frame, SYNTH_EV_PARAM, 121u, gain > 0.0f ? 600.0f : 40.0f, 0.0f});
+        rapidEvents.push_back({frame, SYNTH_EV_PARAM, 122u, gain > 0.0f ? 8000.0f : 200.0f, 0.0f});
+        rapidEvents.push_back({frame, SYNTH_EV_PARAM, 123u, gain > 0.0f ? 8.0f : 0.25f, 0.0f});
+        rapidEvents.push_back({frame, SYNTH_EV_PARAM, 124u, gain > 0.0f ? 18000.0f : 1500.0f, 0.0f});
+    }
+    const StereoRender rapid = render_stereo(
+        48000, 128, frames, rapidEvents, rapidParams, 287u);
+    double rapidPeak = 0.0;
+    for (size_t frame = 0; frame < rapid.left.size(); ++frame) {
+        rapidPeak = std::max(rapidPeak, std::fabs(static_cast<double>(rapid.left[frame])));
+        rapidPeak = std::max(rapidPeak, std::fabs(static_cast<double>(rapid.right[frame])));
+    }
+    const double tailRms = stereo_rms(rapid, 11000u, 1000u);
+
+    const bool response = lowDb >= 9.0 && lowLeakDb <= 1.0 &&
+        midDb >= 9.0 && midLowLeakDb <= 1.0 && midHighLeakDb <= 1.0 &&
+        highDb >= 7.0 && highLeakDb <= 1.0;
+    const bool variableResponse = lowAt300With500 >= lowAt300With80 + 2.0 &&
+        midAt1kWith1k >= midAt1kWith4k + 3.0 &&
+        broadMidAt500 >= narrowMidAt500 + 3.0 &&
+        highAt4kWith3k >= highAt4kWith12k + 2.0;
+    const bool rapidSafe = stereo_is_finite(rapid) && rapidPeak <= 0.5 && tailRms <= 1.0e-6;
+    const bool ok = neutralMismatch == 0u && response && variableResponse && smoothing && rapidSafe;
+    std::printf("%s 82 EQ quality: neutral_mismatches=%zu low_db=%.3f leak=%.3f mid_db=%.3f leaks=%.3f/%.3f high_db=%.3f leak=%.3f variable=%.3f/%.3f %.3f/%.3f %.3f/%.3f %.3f/%.3f smoothing=%d rapid_peak=%.6f tail_rms=%.9f\n",
+                ok ? "PASS" : "FAIL", neutralMismatch, lowDb, lowLeakDb,
+                midDb, midLowLeakDb, midHighLeakDb, highDb, highLeakDb,
+                lowAt300With80, lowAt300With500, midAt1kWith1k, midAt1kWith4k,
+                broadMidAt500, narrowMidAt500, highAt4kWith3k, highAt4kWith12k,
+                smoothing, rapidPeak, tailRms);
+    return ok;
+}
+
 static bool test_insert_fx_block_and_reset() {
     constexpr uint32_t frames = 12000;
     const std::vector<TimedEvent> events = {
@@ -3182,9 +4047,19 @@ static bool test_insert_fx_block_and_reset() {
     bool historiesCleared = engine->insertFx.chorusWrite == 0u &&
         engine->insertFx.chorusPhase[0] == 0.0 && engine->insertFx.chorusPhase[1] == 0.0 &&
         engine->insertFx.distortionTone[0] == 0.0f && engine->insertFx.distortionTone[1] == 0.0f &&
-        engine->insertFx.eqLow[0] == 0.0f && engine->insertFx.eqLow[1] == 0.0f &&
-        engine->insertFx.eqHighLow[0] == 0.0f && engine->insertFx.eqHighLow[1] == 0.0f &&
+        engine->insertFx.eqGainSmoothed[0] == engine->params[100] &&
+        engine->insertFx.eqGainSmoothed[1] == engine->params[101] &&
+        engine->insertFx.eqGainSmoothed[2] == engine->params[102] &&
+        engine->insertFx.eqFrequencySmoothed[0] == engine->params[121] &&
+        engine->insertFx.eqFrequencySmoothed[1] == engine->params[122] &&
+        engine->insertFx.eqMidQSmoothed == engine->params[123] &&
+        engine->insertFx.eqFrequencySmoothed[2] == engine->params[124] &&
         engine->insertFx.compressorEnvelope == 0.0f;
+    for (uint32_t band = 0; band < 3u; ++band)
+        for (uint32_t channel = 0; channel < 2u; ++channel)
+            historiesCleared = historiesCleared &&
+                engine->insertFx.eq[band][channel].z1 == 0.0 &&
+                engine->insertFx.eq[band][channel].z2 == 0.0;
     for (uint32_t channel = 0; channel < 2; ++channel)
         for (uint32_t frame = 0; frame < synth::kChorusDelayCapacity; ++frame)
             historiesCleared = historiesCleared &&
@@ -3316,16 +4191,25 @@ int main() {
     passed += test_builtin_wavetable_palette();
     passed += test_wavetable_mip_crossfade();
     passed += test_realtime_control_smoothing();
+    passed += test_live_envelope_control_smoothing();
     passed += test_unison_voice_placement();
     passed += test_unison_phase_and_width_curves();
+    passed += test_unison_density();
+    passed += test_oscillator_bend_warp();
+    passed += test_oscillator_asym_warp();
+    passed += test_oscillator_sync_warp();
     passed += test_fm_high_guard();
     passed += test_high_range_sample_rates();
     passed += test_lfo2_independent_state();
     passed += test_mod_envelope_state();
     passed += test_shared_insert_fx();
+    passed += test_eq_quality_and_smoothing();
     passed += test_insert_fx_block_and_reset();
     passed += test_insert_fx_performance();
     passed += test_custom_wavetable_loading();
-    std::printf("SUMMARY passed=%u failed=%u total=73\n", passed, 73u - passed);
-    return passed == 73 ? 0 : 1;
+    passed += test_filter_bypass_smoothing();
+    passed += test_filter_mode_smoothing();
+    passed += test_mono_legato_glide();
+    std::printf("SUMMARY passed=%u failed=%u total=82\n", passed, 82u - passed);
+    return passed == 82 ? 0 : 1;
 }

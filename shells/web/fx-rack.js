@@ -3,7 +3,7 @@ export const FX_IDS = Object.freeze(["distortion", "chorus", "eq", "compressor"]
 export const FX_CORE_PARAM_IDS = Object.freeze({
   distortion:Object.freeze({ on:90, drive:91, tone:92, mix:93 }),
   chorus:Object.freeze({ on:94, rate:95, depth:96, width:97, mix:98 }),
-  eq:Object.freeze({ on:99, low:100, mid:101, high:102 }),
+  eq:Object.freeze({ on:99, low:100, mid:101, high:102, lowFrequency:121, midFrequency:122, midQ:123, highFrequency:124 }),
   compressor:Object.freeze({ on:103, threshold:104, ratio:105, attack:106, release:107, makeup:108 }),
   order:Object.freeze([109, 110, 111, 112]),
 });
@@ -13,7 +13,7 @@ export const FX_DEFAULTS = Object.freeze({
   modules:Object.freeze({
     distortion:Object.freeze({ on:false, drive:.28, tone:12000, mix:.48 }),
     chorus:Object.freeze({ on:false, rate:.32, depth:.45, width:.8, mix:.32 }),
-    eq:Object.freeze({ on:false, low:0, mid:0, high:0 }),
+    eq:Object.freeze({ on:false, low:0, mid:0, high:0, lowFrequency:160, midFrequency:1200, midQ:.75, highFrequency:6800 }),
     compressor:Object.freeze({ on:false, threshold:-18, ratio:3, attack:.012, release:.22, makeup:1 }),
   }),
 });
@@ -21,7 +21,7 @@ export const FX_DEFAULTS = Object.freeze({
 const RANGES = Object.freeze({
   distortion:{ drive:[0,1], tone:[800,18000], mix:[0,1] },
   chorus:{ rate:[.05,5], depth:[0,1], width:[0,1], mix:[0,.65] },
-  eq:{ low:[-18,18], mid:[-18,18], high:[-18,18] },
+  eq:{ low:[-18,18], mid:[-18,18], high:[-18,18], lowFrequency:[40,600], midFrequency:[200,8000], midQ:[.25,8], highFrequency:[1500,18000] },
   compressor:{ threshold:[-60,0], ratio:[1,20], attack:[.001,.2], release:[.03,1], makeup:[0,12] },
 });
 
@@ -103,9 +103,9 @@ function chorusModule(context, state) {
 }
 
 function eqModule(context) {
-  const low = context.createBiquadFilter(); const mid = context.createBiquadFilter(); const high = context.createBiquadFilter(); low.type = "lowshelf"; mid.type = "peaking"; high.type = "highshelf"; low.frequency.value = 160; mid.frequency.value = 1200; mid.Q.value = .75; high.frequency.value = 6800;
+  const low = context.createBiquadFilter(); const mid = context.createBiquadFilter(); const high = context.createBiquadFilter(); low.type = "lowshelf"; mid.type = "peaking"; high.type = "highshelf";
   const module = createMixModule(context, (input, wet) => { input.connect(low); low.connect(mid); mid.connect(high); high.connect(wet); });
-  return { ...module, update(values) { setParam(low.gain, values.low, context); setParam(mid.gain, values.mid, context); setParam(high.gain, values.high, context); module.setMix(values.on, 1); } };
+  return { ...module, update(values) { setParam(low.frequency, values.lowFrequency, context); setParam(low.gain, values.low, context); setParam(mid.frequency, values.midFrequency, context); setParam(mid.Q, values.midQ, context); setParam(mid.gain, values.mid, context); setParam(high.frequency, values.highFrequency, context); setParam(high.gain, values.high, context); module.setMix(values.on, 1); } };
 }
 
 function compressorModule(context) {

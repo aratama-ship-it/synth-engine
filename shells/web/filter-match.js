@@ -27,7 +27,7 @@ export function planFilterCutoffProbe({
   const brightnessRatio = reference / current;
   const base = { filterMode:mode, currentCutoff:cutoff, referenceBrightness:reference, currentBrightness:current, minimum, maximum, brightnessRatio };
   if (!(Number(filterEnabled) >= .5)) return unavailable("Filter is BYPASS; ON is preserved", base);
-  if (![0, 1].includes(mode)) return unavailable("Cutoff calibration supports LP12 / LP24 only", base);
+  if (![0, 4].includes(mode)) return unavailable("Cutoff calibration supports LP12 / LP24 only", base);
   if (!finitePositive(cutoff) || cutoff < minimum || cutoff > maximum) return unavailable("Current Cutoff is outside its parameter range", base);
   if (!finitePositive(reference) || !finitePositive(current)) return unavailable("Brightness metrics are unavailable", base);
   if (Math.abs(brightnessRatio - 1) <= FILTER_MATCH_ALIGNED_RATIO) {

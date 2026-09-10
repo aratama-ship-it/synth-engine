@@ -31,13 +31,13 @@ JUCE も AGPL か商用ライセンスの二択です。**ライセンスの都�
 
 | | 状態 |
 |---|---|
-| DSPコア | 2オペのウェーブテーブル OSC、内蔵4テーブル＋セッション用カスタム1枠、中心加重デチューン＋等間隔ステレオ配置のユニゾン最大4声、Random / Fixed / Balanced位相開始、Linear / Natural Width、B→A の位相変調（FM）と、高域で深さと折返し成分を折衷するHQ Guard、サブ、white/pink ノイズ、波形モーフ、Morph／FM／Levelの5 ms操作スムージング、TPT/ZDF SVF、アンプ／フィルタEGと独立したMod EG、独立2基の6波形LFO、6スロットのモジュレーションマトリクス、マクロ4本、順序変更できるDistortion / Chorus / 3-band EQ / Compressor |
+| DSPコア | 2オペのウェーブテーブル OSC、内蔵4テーブル＋セッション用カスタム1枠、中心加重デチューン＋等間隔ステレオ配置のユニゾン最大4声、4声時の内側2声を芯に外側2声を連続追加する左右対称・エネルギー正規化Density、周期内の読出しを変形するalias-aware BEND / ASYMと、master周期resetをPolyBLEP補正するSYNC Warp、POLY / MONO / LEGATOと0〜2秒のGlide、Random / Fixed / Balanced位相開始、Linear / Natural Width、B→A の位相変調（FM）と、高域で深さと折返し成分を折衷するHQ Guard、サブ、white/pink ノイズ、波形モーフ、Morph／FM／Level／Density／Warp Amount・保持中のAMP／FILTER Sustain・FILTER ENV AMOUNTの5 ms操作スムージング、Warp modeの3-way one-hot平滑化、FILTER ON/BYPASSとMODEの5 msクロスフェード、TPT/ZDF SVF、アンプ／フィルタEGと独立したMod EG、独立2基の6波形LFO、6スロットのモジュレーションマトリクス、マクロ4本、順序変更できるDistortion / Chorus / Frequency・Q・Gainを5 ms平滑化するlow-shelf・mid-bell・high-shelf EQ / Compressor |
 | AUv3 プラグイン | `auval` 警告0で通過。パラメータ、状態保存、ファクトリープリセット。共有コアの4 Insertもパラメータ公開済み（M4nの署名・実ホスト確認は未実施） |
 | スタンドアロン | 起動して A〜Z キーで演奏できる |
-| ブラウザ | AudioWorkletでライブ演奏、Z／Xによる-3〜+3 octave移動、2048 samples × 1〜4 framesのセッション限定Custom WT読込・置換・安全消去とA/B別の現在frame位置表示、初回出力の安全フェード、エネルギー正規化したReverb IR、フォーカス喪失時のpanic停止、OfflineAudioContextでオフライン書き出し、`?quality=1`の検証画面で4声ユニゾンとFM高域処理を独立比較、Studio画面の`MATCH`で参照音をローカル測定し、根拠付きAMP ENV候補、実測較正したLP12/LP24 Filter Cutoff候補の明示適用と現在のcoreパッチとの音量補正A/B |
+| ブラウザ | AudioWorkletでライブ演奏、PERFORMANCE帯からのPOLY / MONO / LEGATO・Glide操作、Z／Xによる-3〜+3 octave移動、OSC A／Bごとの`OFF / BEND / ASYM / SYNC`＋符号付きWarp AmountとMatrix変調入口、2048 samples × 1〜4 framesのセッション限定Custom WT読込・置換・安全消去とA/B別の現在frame位置表示、初回出力の安全フェード、エネルギー正規化したReverb IR、常時表示の`STOP SOUND`／Escで出力ゲートをゼロ固定してAudioContextを休止するpanic停止、共有3-band EQのFrequency / Q / Gain操作とDSP係数由来のレスポンスカーブ、OfflineAudioContextでオフライン書き出し、`?quality=1`の検証画面で4声ユニゾンの位相／Width／2.0〜5.0 Density、FM高域処理、A/B連動のBEND -／OFF／BEND +を独立比較、Studio画面の`MATCH`で参照音をローカル測定し、根拠付きAMP ENV候補、実測較正したLP12/LP24 Filter Cutoff候補の明示適用と現在のcoreパッチとの音量補正A/B。Patch ToolsからSerum 2用のローカル変換ガイドへ進み、OSC / ENV / FILTERと単純なENV・Macro Matrix routeを近似したschema 1 JSONを既存IMPORTから読み込める |
 | フィルタ | 12/24 dB の SVF（LP/BP/HP/Notch）、キートラック、専用エンベロープ |
 | LFO | 2基とも6波形、フリーラン／ノートで頭出し。LFO 1はカットオフ・ピッチ・音量への直結とMatrix入力、LFO 2は独立したMatrix入力 |
-| モジュレーションマトリクス | 11信号源 × 13送り先、6スロット固定。Macro 1〜4とMod EGを選択でき、マクロ4本はパラメータ／`SYNTH_EV_MACRO` から5 ms平滑化つきで操作可能 |
+| モジュレーションマトリクス | 11信号源 × 15送り先、6スロット固定。A/B別Warpを含み、Macro 1〜4とMod EGを選択できる。マクロ4本はパラメータ／`SYNTH_EV_MACRO` から5 ms平滑化つきで操作可能 |
 
 ## 実測値（Apple M4 Pro / macOS 26.5.2）
 
@@ -48,22 +48,22 @@ JUCE も AGPL か商用ライセンスの二択です。**ライセンスの都�
 | **AU と CLI の出力** | **ビット一致**（ベロシティが MIDI の7bitで表せる値のとき） |
 | **wasm と native の出力** | **ビット一致**（全18プリセット＋4 Insert有効fixtureで確認。`-ffp-contract=off` が必須） |
 | ブロックサイズ不変性 | block 1／7／64／128／511 でビット一致 |
-| サンプルレート | 44.1／48／96 kHz すべてで NaN・Inf ゼロ |
-| 処理時間 | 6スロット・LP24・LFO・16音 × ユニゾン4に4 Insertを加えて平均 281.27 µs・p99 369.00 µs（48 kHz / 128 frames、期限の50%は1333.5 µs） |
-| ユニゾン | 2／3／4声のRMS差は1声比 +0.04／+0.43／+0.38 dB。4声full widthの左右差 0.006 dB、width 0は左右ビット一致 |
-| エイリアス | ノコギリ波 C8 で −96.2 dB、FM C5全開で −94.3 dB。C8のFM off-grid fold指標はLegacy +9.11 dB → HQ −23.60 dB（32.71 dB改善） |
+| サンプルレート | 44.1／48／96 kHz すべてで NaN・Inf ゼロ。低出力のFILTER密操作ゲートも各rateでpeak 0.25以下、release／panic後0。48 kHzではblock境界の同一frame操作束も確認 |
+| 処理時間 | 6スロット・LP24・LFO・16音 × ユニゾン4に4 Insertを加えて平均 325.24 µs・p99 420.29 µs（48 kHz / 128 frames、期限の50%は1333.5 µs） |
+| ユニゾン | 2／3／4声のRMS差は1声比 +0.04／+0.43／+0.38 dB。4声full widthの左右差 0.006 dB、width 0は左右ビット一致。4.0 FULL→5.0 WIDE+でside/mid比 0.628→0.698、モノ合成レベル差 −0.35 dB |
+| エイリアス | ノコギリ波 C8 で −96.2 dB、FM C5全開で −94.3 dB。C8のFM off-grid fold指標はLegacy +9.11 dB → HQ −13.36 dB（22.47 dB改善）。Bend +75%はunguarded −18.53 dB → guarded −51.99 dB（33.46 dB改善）、SYNC固定fixtureはnaive hard sync −23.01 dB → PolyBLEP −29.79 dB（6.78 dB改善） |
 | フィルタ | −3 dB点の最大誤差 0.342%、LP12 −11.94 dB/oct、LP24 −23.88 dB/oct、resonance 0.8 のピーク差 +13.82 dB、キートラック 1oct で 2.003 倍 |
 | 共振の実挙動 | resonance 1（Q=100）でカットオフ周波数にリンギングし 136 dB/秒 で減衰。**理論値と一致**（持続的な自己発振はしない） |
 | LFO | 6波形とも周期誤差 0%、S&H再レンダーはビット一致。設定 5 Hz で明るさが実測 毎秒 5.0 回変化 |
-| wasm サイズ | 75,383 バイト（gzip 21,094 バイト） |
-| 自動テスト | Web 71項目、core 73項目すべて PASS。Webには物理出力へ接続しないWASM／AudioWorklet安全ゲートを含む。別途、実ブラウザのOfflineAudioContext再生成確認も通過 |
+| wasm サイズ | 90,411 バイト（gzip 26,140 バイト） |
+| 自動テスト | Web 79項目、core 82項目、Serum 2 bridge 7項目すべて PASS。Webには物理出力へ接続しないWASM／AudioWorklet安全ゲートを含む。別途、実ブラウザでA/B別Warpの4 mode、Preset Bridge導線、EQカーブを確認 |
 
 ## 動かす
 
 必要なもの: Xcode（clang / swiftc）、GNU make、Node.js。WASM を作るなら `brew install llvm lld`。
 
 ```bash
-make test                 # コアの自動テスト73項目
+make test                 # コアの自動テスト82項目
 make cli                  # オフラインレンダラー
 ./build/render-cli --preset presets/m1_unison_saw.txt --events fixtures/m0_events_chord.txt \
     --out build/out.wav --sr 48000 --block 128 --frames 96000
@@ -84,7 +84,15 @@ auval -v aumu Sken Arat       # AU の検証
 
 node tools/serve.mjs          # ブラウザ版 → http://127.0.0.1:8963/shells/web/demo.html
 node tools/analyze-sound.mjs design/verify/ref/rsk_epiano.wav  # 参照音の測定JSON
+node tools/serum2-preset-bridge.mjs INPUT.SerumPreset --out PATCH.json --report REPORT.json
 ```
+
+`tools/serve.mjs`はlocalhost専用です。Preset Bridge判断ページでは、比較対象として固定した3件だけを
+`SERUM ORIGINAL`から元の`.SerumPreset`名で取得できます。`SYNTHENGINEで開く`は対応する変換patchを
+SynthEngineへ一手で読み込み、音を出さずに待機します。`JSON保存`と`MAPPING`も補助導線として残しています。
+現在の候補はSerum 2のENV番号を実画面に合わせて補正し、Filter Driveと確認できたTape Satだけを
+低いDrive / Mix上限つきのSynthEngine Distortionへ近似します。その他のFXやFat値は推測で補いません。
+任意のfilesystem pathやURLは受け付けず、原本をworkspaceや公開buildへ複製しません。
 
 ブラウザで演奏する公開版: [SynthEngine Web Synth](https://aratama-ship-it.github.io/synth-engine/)
 

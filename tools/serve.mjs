@@ -11,6 +11,23 @@ const PORT = Number(process.argv[2] || 8963);
 // M2 の参照音づくり専用の読み取り専用マウント。random-scale-keys の旧音源を
 // 同一オリジンで import できるようにするためだけのもの（書き込みは一切しない）。
 const REF_ROOT = path.resolve(ROOT, "../random-scale-keys/prototype");
+// M4at のローカル比較専用。Serum 2 factory presetをworkspaceへ複製せず、
+// 本人が明示的に押した3ファイルだけをlocalhost経由でread-only downloadする。
+// 任意パスやディレクトリを受け取らず、公開buildにも含めない。
+const LOCAL_SERUM_PRESETS = Object.freeze({
+  "/local-serum-preset/pianofy.SerumPreset":Object.freeze({
+    source:"/Library/Audio/Presets/Xfer Records/Serum 2 Presets/Presets/Factory/Lead/LD - Pianofy.SerumPreset",
+    download:"LD - Pianofy.SerumPreset",
+  }),
+  "/local-serum-preset/morpheus.SerumPreset":Object.freeze({
+    source:"/Library/Audio/Presets/Xfer Records/Serum 2 Presets/Presets/Factory/Bass/Synth/BA - Morpheus.SerumPreset",
+    download:"BA - Morpheus.SerumPreset",
+  }),
+  "/local-serum-preset/neon-drive.SerumPreset":Object.freeze({
+    source:"/Library/Audio/Presets/Xfer Records/Serum 2 Presets/Presets/Factory/Bass/Retro Analog/BA - Neon Drive.SerumPreset",
+    download:"BA - Neon Drive.SerumPreset",
+  }),
+});
 const TYPES = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -21,6 +38,23 @@ const TYPES = {
 
 http.createServer((req, res) => {
   let rel = decodeURIComponent(req.url.split("?")[0]);
+
+  const localSerumPreset = LOCAL_SERUM_PRESETS[rel];
+  if ((req.method === "GET" || req.method === "HEAD") && localSerumPreset) {
+    fs.stat(localSerumPreset.source, (err, stat) => {
+      if (err || !stat.isFile()) { res.writeHead(404); res.end("404"); return; }
+      res.writeHead(200, {
+        "Content-Type":"application/octet-stream",
+        "Content-Length":stat.size,
+        "Content-Disposition":`attachment; filename="${localSerumPreset.download}"`,
+        "Cache-Control":"no-store",
+        "X-Content-Type-Options":"nosniff",
+      });
+      if (req.method === "HEAD") { res.end(); return; }
+      fs.createReadStream(localSerumPreset.source).pipe(res);
+    });
+    return;
+  }
 
   // ブラウザ自己診断（shells/web/selftest.html）の結果を受け取って追記する。
   // Safari は Claude のブラウザツールから操作できないため、ページ側から結果を送ってもらう。

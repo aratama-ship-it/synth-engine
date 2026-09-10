@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MOD_DESTINATIONS, MOD_SOURCES, findAssignmentSlot, modulationAmountLabel, modulationSlotIds } from "../mod-matrix.js";
+import { MOD_DEST_BY_PARAM, MOD_DESTINATIONS, MOD_SOURCES, findAssignmentSlot, modulationAmountLabel, modulationSlotIds } from "../mod-matrix.js";
 
-test("matrix labels match the 12 source and 14 destination core contract", () => {
+test("matrix labels match the 12 source and 16 destination core contract", () => {
   assert.equal(MOD_SOURCES.length, 12);
   assert.equal(MOD_SOURCES[8], "LFO 2");
   assert.equal(MOD_SOURCES[9], "Macro 3");
   assert.equal(MOD_SOURCES[10], "Macro 4");
   assert.equal(MOD_SOURCES[11], "ENV 3 · Mod");
-  assert.equal(MOD_DESTINATIONS.length, 14);
+  assert.equal(MOD_DESTINATIONS.length, 16);
+  assert.equal(MOD_DESTINATIONS[14], "OSC A Warp");
+  assert.equal(MOD_DESTINATIONS[15], "OSC B Warp");
+  assert.equal(MOD_DEST_BY_PARAM[117], 14);
+  assert.equal(MOD_DEST_BY_PARAM[118], 15);
   assert.deepEqual(modulationSlotIds(0), { source:55, destination:56, amount:57 });
   assert.deepEqual(modulationSlotIds(5), { source:70, destination:71, amount:72 });
   assert.throws(() => modulationSlotIds(6), RangeError);

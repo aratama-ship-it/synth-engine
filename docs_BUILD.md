@@ -70,7 +70,7 @@ slot 4はセッション用Customです。未読込時は安全なsine 1フレ�
 `synth_load_wavetable()`で2048 samples × 1〜4 framesを読み込みます。入力は全フレーム検証後に
 DC除去・peak 0.95正規化・10段mip生成を行い、無音・NaN・Inf・過大値は既存内容を保持して拒否します。
 
-## パラメータ一覧（engine version 16）
+## パラメータ一覧（engine version 28）
 
 | ID | 名前 | 範囲 | 既定 |
 |---:|---|---:|---:|
@@ -130,22 +130,22 @@ DC除去・peak 0.95正規化・10段mip生成を行い、無音・NaN・Inf・�
 | 53 | ampEgCurve | 0..1 | 0 |
 | 54 | filterEgCurve | 0..1 | 0 |
 | 55 | modSlot0Source | 0..11 int | 0 |
-| 56 | modSlot0Dest | 0..13 int | 0 |
+| 56 | modSlot0Dest | 0..15 int | 0 |
 | 57 | modSlot0Amount | -1..1 | 0 |
 | 58 | modSlot1Source | 0..11 int | 0 |
-| 59 | modSlot1Dest | 0..13 int | 0 |
+| 59 | modSlot1Dest | 0..15 int | 0 |
 | 60 | modSlot1Amount | -1..1 | 0 |
 | 61 | modSlot2Source | 0..11 int | 0 |
-| 62 | modSlot2Dest | 0..13 int | 0 |
+| 62 | modSlot2Dest | 0..15 int | 0 |
 | 63 | modSlot2Amount | -1..1 | 0 |
 | 64 | modSlot3Source | 0..11 int | 0 |
-| 65 | modSlot3Dest | 0..13 int | 0 |
+| 65 | modSlot3Dest | 0..15 int | 0 |
 | 66 | modSlot3Amount | -1..1 | 0 |
 | 67 | modSlot4Source | 0..11 int | 0 |
-| 68 | modSlot4Dest | 0..13 int | 0 |
+| 68 | modSlot4Dest | 0..15 int | 0 |
 | 69 | modSlot4Amount | -1..1 | 0 |
 | 70 | modSlot5Source | 0..11 int | 0 |
-| 71 | modSlot5Dest | 0..13 int | 0 |
+| 71 | modSlot5Dest | 0..15 int | 0 |
 | 72 | modSlot5Amount | -1..1 | 0 |
 | 73 | macro1 | 0..1 | 0 |
 | 74 | macro2 | 0..1 | 0 |
@@ -187,8 +187,24 @@ DC除去・peak 0.95正規化・10段mip生成を行い、無音・NaN・Inf・�
 | 110 | insertOrder2 | 0..3 int | 1 |
 | 111 | insertOrder3 | 0..3 int | 2 |
 | 112 | insertOrder4 | 0..3 int | 3 |
+| 113 | voiceMode | 0..2 int | 0 |
+| 114 | glideTime | 0..2 s | 0 |
+| 115 | oscAUnisonDensity | 0..1.2247449 | 1 |
+| 116 | oscBUnisonDensity | 0..1.2247449 | 1 |
+| 117 | oscAWarpAmount | -1..1 | 0 |
+| 118 | oscBWarpAmount | -1..1 | 0 |
+| 119 | oscAWarpMode | 0..2 int | 0 |
+| 120 | oscBWarpMode | 0..2 int | 0 |
+| 121 | eqLowFrequency | 40..600 Hz | 160 |
+| 122 | eqMidFrequency | 200..8000 Hz | 1200 |
+| 123 | eqMidQ | 0.25..8 | 0.75 |
+| 124 | eqHighFrequency | 1500..18000 Hz | 6800 |
 
 filterModeは0=LP12、1=BP12、2=HP12、3=Notch、4=LP24、5=HP24です。
+voiceModeは0=POLY、1=MONO、2=LEGATOです。MONO / LEGATOは最後に押した保持ノートを優先し、離したときは次に新しい保持ノートへ戻ります。MONOはglideTimeが0のときだけ保持中の次ノートで包絡を再アタックし、Glide中は現在の包絡を保って音程だけを移動します。LEGATOはGlide値にかかわらず保持中の包絡を保ちます。glideTimeはこの保持中の遷移を0〜2秒で平滑化し、0では即時です。
+oscAUnisonDensity / oscBUnisonDensityは各OSCが4 unisonのときだけ働きます。内側2声を常に残し、外側2声の寄与を0〜`sqrt(1.5)`で左右対称に加え、`1 / sqrt(2 + 2 * density^2)`でエネルギー正規化します。比較UIの`2.0〜5.0 LAYERS`は`2 + 2 * density^2`で表す有効寄与であり、小数個のオシレータを生成する意味ではありません。既定値1の`4.0 FULL`は従来の4声とビット一致し、`5.0 WIDE+`は実声数や処理レイヤーを増やさず外側ペアを約1.225倍へ強めます。unison 1〜3では無効です。
+oscAWarpAmount / oscBWarpAmountはOSC A/Bの周期内読出し位相を変形します。0は完全バイパスです。oscAWarpMode / oscBWarpModeは0=BEND、1=ASYM、2=SYNC。BENDの正は中央へ寄せ、負は端へ引きます。ASYMの正は位相を前へ、負は後ろへ傾けます。SYNCは`2^(2 * amount)`の0.25〜4倍でmaster周期内の読出しを伸縮し、master resetの段差をPolyBLEPで補正します。12本の連続操作は5 msで平滑化し、modeはOSCごとのBEND / ASYM / SYNC one-hot weightを同じ5 msで平滑化するため、BENDからSYNCへ切り替える途中にASYMを通りません。各方式の最大読出し速度をmip周波数へ反映します。SubとNoiseには作用しません。
+eqLowFrequency / eqHighFrequencyは棚型EQの境界、eqMidFrequency / eqMidQはベル型EQの中心と幅です。3 gainと4つのFrequency / Qは発音中に5 msで平滑化し、idle設定とresetでは目標へ直接合わせます。旧patchに新IDが無い場合はM4awの固定値160 Hz / 1.2 kHz / Q 0.75 / 6.8 kHzを補うため、既存音を維持します。
 lfoShapeは0=sine、1=triangle、2=saw上行、3=saw下行、4=square、5=S&Hです。
 ampEgCurveとfilterEgCurveは、各EGのディケイ／リリースに共通して作用します。
 0は従来の指数カーブ、1は直線、その間は正規化した指数カーブと直線の補間です。
@@ -201,8 +217,8 @@ curve>0では進行度を経過サンプル数から求め、ディケイ／リ�
 -1..1へクランプします。Destinationは0=なし、1=Osc A Level、2=Osc B Level、
 3=Osc A Morph、4=Osc B Morph、5=FM B→A、6=Sub Level、7=Noise Level、
 8=Filter Cutoff、9=Filter Resonance、10=全オシレータPitch、11=Osc A Detune、
-12=LFO Rate、13=ボイスAmpです。full量は順に4、4、1、1、1、4、4、8 octave、
-1、1200 cent、50 cent、8 octave、1です。
+12=LFO Rate、13=ボイスAmp、14=OSC A Warp、15=OSC B Warpです。full量は順に4、4、1、1、1、4、4、8 octave、
+1、1200 cent、50 cent、8 octave、1、1、1です。
 
 同じDestinationへの寄与は6スロット分を合算してから1回だけクランプします。
 Destination 12のLFO 1 Rateだけは全ボイス共通で、ボイス0のSource値を評価した結果を使います。
@@ -239,7 +255,7 @@ WASM_CLANG が未設定なら成功扱いでskipを表示します。LLVM clang�
 
     WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang make wasm
 
-## テスト72項目
+## テスト82項目
 
 tests/test_main.cpp はフレームワークを使わず、次を測定します。
 
@@ -261,7 +277,7 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 16. サブの周波数ピーク
 17. ノイズ減衰とseed決定論
 18. 100 Hz〜10 kHzのピンクノイズ傾斜
-19. 全113パラメータのmin/default/maxスイープ
+19. 全125パラメータのmin/default/maxスイープ
 20. 16音・両OSC 4 unison・サブ・ノイズの処理時間
 21. M1a全構成のblock 1/7/64/128/511ビット一致
 22. M0 saw／M1 unisonのゴールデンハッシュ一致
@@ -277,7 +293,7 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 32. フィルタ＋LFO有効時のblock 1/7/64/128/511ビット一致
 33. 全M1b機能有効時のreset後レンダー決定論
 34. LP24・LFO・16音×unison 4の平均／p99処理時間と期限判定
-35. curve=0を明示したM0 saw／M1 unisonのゴールデンハッシュ一致、および113パラメータのメタデータ
+35. curve=0を明示したM0 saw／M1 unisonのゴールデンハッシュ一致、および125パラメータのメタデータ
 36. 直線フィルタEGのディケイ25%／50%／75%時点での実測値
 37. curve 0／0.5／1でエンベロープが0.5へ落ちる時刻の単調増加
 38. curve、decay、releaseの全80組合せでNaN／Inf、振幅上限、リリース後のボイス解放
@@ -286,7 +302,7 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 41. M1 unisonの変更前後におけるRMS差1 dB以内／スペクトル重心差10%以内
 42. 全スロット無効時のM0 saw／M1 unison／M1b filter sweepとG4ゴールデンハッシュの一致
 43. LFO 1／アンプEG／フィルタEG／ベロシティ／ノート位置／macro1〜4／LFO 2／Mod EGの11信号源
-44. 13送り先それぞれのRMS差1 dB以上またはスペクトル重心差5%以上
+44. 15送り先それぞれのRMS差1 dB以上またはスペクトル重心差5%以上、およびWarp変調の上限clamp
 45. Filter Cutoffへ同量を2スロットから送ったときの変化幅が1スロット時の2倍±20%
 46. frame 24000のmacroイベント、5 msスムーサ、未知macro idの無視件数
 47. 6スロット有効時のblock 1／7／64／128／511ビット一致とreset後の再レンダー一致
@@ -306,7 +322,7 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 60. 同じMIDI音高でも異なる発音IDなら個別にNOTE_OFFでき、block 1／7／64／128／511でPCM一致すること
 61. 内蔵4 wavetableが各4 frame・全値finiteで、slot 1〜3の終端音色が先頭と十分に異なり、peakが一致すること
 62. sawのmip境界直前／直後で、100 cent smoothstep crossfadeがhard switchより20 dB以上段差を減らし、遷移外では既存readerとビット一致すること
-63. Morph A/B、Level A/B、Master、FM、Sub、Noiseの8操作が発音中は5 msで平滑化され、idle設定時は目標値へスナップすること
+63. Morph A/B、Level A/B、Master、FM、Sub、Noise、Density A/B、Warp Amount A/Bの12連続操作と、A/B別Warpの3-way one-hot mode weightが発音中は5 msで平滑化され、idle設定時は目標値へスナップすること
 64. unison 1〜4声のdetune／pan配置が左右対称・平均0で、4声時にdetune `-1/-0.2/+0.2/+1`と等間隔panを分離すること
 65. Balanced位相が4声を中心へ対称配置し、Natural Widthが端点を保ちながら中間値を広げること
 66. FM High Guardが低音の出力を維持し、高音の折返し成分を20 dB以上減らすこと
@@ -316,6 +332,16 @@ tests/test_main.cpp はフレームワークを使わず、次を測定します
 70. 4 Insert有効時のblock 1／128一致、reset履歴消去、Chorus 22 msを含むtail frames
 71. 6スロット・LP24・16音×unison 4・全Insert有効時の平均／p99処理時間と期限判定
 72. Custom slotの安全な初期値、1〜4 frame読込、全mip peak 0.95上限、selector範囲、無音／非有限入力の非破壊拒否
+73. 44.1／48／96 kHzでC8 wavetableとHQ FMの高域安全性、低sample rateでの折返し低減
+74. Filter ON/BYPASSの5 msクロスフェード、static ON、reset時の状態消去、有限出力
+75. AMP / FILTER SustainとFILTER ENV AMOUNTの保持中5 ms平滑化、新規noteへの直接反映
+76. 6 Filter modeの5 ms one-hot補間、発音中の高速切替とMatrix併用時の有限出力
+77. POLYの既存同時発音、MONOの最新保持音・指戻し・release、Glide中の包絡保持、Glide 0の再アタック、LEGATOの包絡保持、Glideの有限な収束
+78. 4 unison densityの左右対称、2.0〜5.0のエネルギー正規化、外側ペアの単調な追加、既定4.0の従来4声との一致、1〜3声への非干渉、WIDE+のside/mid増加とモノ合成レベル差
+79. OSC Bend Warpの単調な位相写像、0／0.5／1の基準点、OFF完全一致、BEND -／+のPCM差、alias-aware mipによる折返し低減
+80. OSC ASYM WarpとBEND間補間の単調性、端点固定、導関数範囲、正負／BENDとの差、既定BENDのビット一致、alias-aware mipによる折返し低減
+81. OSC SYNC Warpの0.25〜4倍ratio、Amount 0／既定patchのビット一致、正負のPCM差、PolyBLEPによるnaive hard sync比の折返し低減、全mode遷移のone-hot和と非対象mode非混入
+82. 3-band EQのneutral完全一致、各帯域の応答と漏れ、Frequency / Q可変時の中心移動・幅、5 ms平滑化、高速操作時の有限出力とrelease後無音
 
 エイリアス測定は4-term Blackman-Harris窓を使い、基音電力に対する「基音より上、かつ
 期待される第1〜4倍音の各±10 binを除いた電力」の比です。MIDI 108では選択される
@@ -426,6 +452,101 @@ mipの倍音上限が4のため、この4倍音を期待成分とします。
 - 既存IDとC ABIは維持し、パラメータ90〜112を末尾追加する。engine versionは15とする
 - Chorus有効時は最大22 msを`synth_get_tail_frames`へ追加する
 
+## M4akで確定した事項
+
+- 通常の`VOICES`と各OSCの`UNISON`は整数の発音数として維持し、小数の意味を混ぜない
+- 4声時だけ、内側2声を芯として外側2声の寄与を左右対称に連続追加するA/B別densityを持つ
+- 表示上の有効寄与は`2 + 2 * density^2`の2.0〜4.0 layersであり、実際の発音レイヤー数と最大同時発音数は整数のまま
+- 合計振幅は`1 / sqrt(2 + 2 * density^2)`で正規化し、音量の急増と定位中心の移動を避ける
+- densityは既存の5 ms制御スムーサを通し、初期値1では従来4声とビット一致、unison 1〜3では無効とする
+- パラメータ115 / 116を末尾追加し、engine versionは23とする。通常画面には出さず`?quality=1`の比較UIだけでA/Bを連動操作する
+
+## M4alで確定した事項
+
+- 比較UIを連続rangeから`2.0 FOCUS / 3.0 BALANCED / 4.0 FULL / 5.0 WIDE+`の4段切り替えへ変更する
+- `4.0 FULL`を既定値1として維持し、従来の4声PCMと完全一致させる
+- density上限を`sqrt(1.5)`へ広げ、WIDE+は実声数・pan位置・CPU上の処理レイヤーを増やさず外側ペアのraw gainだけを約22.5%強める
+- 5 ms平滑化とエネルギー正規化を拡張範囲でも維持し、発音中の切り替えでnote resetや再アタックを起こさない
+- パラメータ数117とC ABIは維持し、opt-inのPCM意味追加によりengine versionは24とする
+
+## M4amで確定した事項
+
+- 末尾ID 117 / 118へA/B別のBend Warp量`-1..1`を追加し、既定値0は旧PCMと完全一致させる
+- 位相写像は`p + 0.85 * amount * sin(2*pi*p) / (2*pi)`とし、導関数0.15..1.85の単調変形に限定する
+- 最大局所速度`1 + 0.85 * abs(amount)`をwavetable mip選択へ反映し、高域の折返しを保守的に抑える
+- AはFM後の読出し位相、Bは可聴信号とB→A変調源の両方をwarpし、Sub / Noiseは変更しない
+- A/B値は5 ms平滑化し、通常画面には出さず`?quality=1`の`BEND - / OFF / BEND +`だけで連動比較する
+- パラメータ数119、engine version 25。C ABIとイベント形式は変更しない
+
+## M4anで確定した事項
+
+- M4amのA/B別Bend Warpを、通常OSC A／Bカードの波形直下へ`OFF / BEND` modeと符号付き`AMOUNT`として表示する
+- modeは現在のAmountから導出し、0はOFF、非0はBENDとする。mode専用のコア値や保存状態は増やさない
+- OFFからBENDへ戻すと各OSCで最後に使った非0値を復元し、未使用時は比較値`+0.75`を使う
+- A/B独立操作とQuality LabのA/B連動比較を双方向に表示同期する
+- UI操作はnote停止、voice reset、自動発音、AudioContext開始を行わず、M4amの5 ms平滑化をそのまま使う
+- DSP、パラメータ数119、engine version 25、C ABI、パッチ形式は変更しない
+
+## M4aoで確定した事項
+
+- Matrix destination 14 / 15へ`OSC A Warp` / `OSC B Warp`を末尾追加し、既存0〜13の番号は維持する
+- 6つのdestination parameter ID 56 / 59 / 62 / 65 / 68 / 71の範囲を`0..15`へ広げる
+- full-scaleは1.0。A/Bとも`base + source * amount`を合算後に`-1..1`へclampし、その実効値をphase warpとalias-aware mipへ使う
+- Bの可聴信号とB→A FM sourceには同じ実効Warpを使い、Sub / Noiseは変更しない
+- 通常OSCの各Amountへ既存形式の`+ MOD`を追加し、Matrix行と同じ6 slotを編集する
+- パラメータ数119、C ABI、イベント形式、patch schemaは維持し、opt-in PCM経路追加としてengine versionを26へ更新する
+
+## M4apで確定した事項
+
+- 末尾ID 119 / 120へA/B別Warp modeを追加し、0=BEND、1=ASYM、既定0とする
+- ASYMは`p + 0.85 * amount * p * (1 - p)`で周期端を固定し、導関数0.15..1.85の単調変形に限定する
+- BENDとASYMの切替中は二つの写像を既存control smootherと同じ5 msで補間し、note reset／再アタックを起こさない
+- Amount 0はmodeにかかわらず既存PCMと完全一致し、mip保護は既存の最大局所速度`1 + 0.85 * abs(amount)`を共有する
+- 通常OSCの既存selectへ`ASYM`だけを加え、A/B別mode、波形、状態文、パッチ保存を同期する。Quality Labの固定3比較はBEND専用のまま維持する
+- パラメータ数121、C ABI、イベント形式、patch schema 1は維持し、opt-in PCM追加としてengine versionを27へ更新する
+
+## M4aqで確定した事項
+
+- ID 119 / 120の範囲を`0..2`へ広げ、2=`SYNC`を追加する。既定0、既存BEND / ASYM、パラメータ数121、C ABI、イベント形式、patch schema 1は維持する
+- SYNC ratioは`2^(2 * amount)`の0.25〜4倍とし、読出し位相は`fract(masterPhase * ratio)`、Amount 0は既存PCMを直接通す
+- master周期resetだけをPolyBLEP補正し、mipは`frequency * max(1, ratio)`で選ぶ
+- mode切替は連続値0→1→2ではなく、OSCごとのBEND / ASYM / SYNC one-hot weightを5 ms補間する。BEND↔SYNC間にASYMを混入させない
+- 通常OSCの既存selectを`OFF / BEND / ASYM / SYNC`へ拡張し、符号、stretch / compress、ratioを状態文と波形のアクセシブル名へ出す
+- engine versionを28へ更新する。SYNCの音楽的な硬さと有用なAmount範囲は低音量の本人試聴へ残す
+
+## M4arで確定した事項
+
+- 他社presetの同一音再生は主張せず、確認できた数値だけを既存schema 1 patchへ変換し、`mapped / approximate / unsupported`をreportへ分ける
+- 最初の実動対象はSerum 2 `.SerumPreset`。`XferJson` header、JSON metadata、Zstandard圧縮CBOR payloadを上限付きでdecodeするローカルCLIを`tools/serum2-preset-bridge.mjs`へ置く
+- 他社wavetable / sample資産、展開payload、factory presetをrepoへ複製せず、元presetはread-onlyで扱う
+- 原本と同じ出力先、patch / reportの重複、既存ファイルへの暗黙の上書きを拒否する
+- Serum 1 `.fxp`、Massive `.nmsv`、Avengerは実sampleと内部形式を確認できるまで未対応と表示する
+- ブラウザ直読みはまだ行わず、Patch Toolsの`PRESET BRIDGE`から判断用HTMLへ進み、CLI出力を既存`IMPORT JSON`で読む
+
+## M4atで確定した事項
+
+- Serum 2 modulationはENV 1〜3 / Macro 1〜4のlinearな単一source routeだけを、`ModSlot0..63`の順に既存6-slot Matrixへ最大6件近似する
+- Aux source、bypass、bipolar、curve、LFO、未知source / destination、6件超過は適用せず、report version 2の`modulation.skipped`へroute別の理由を残す
+- 変換されたENV 2 / ENV 3だけ対応するADSRを、使用されたMacro 1〜4だけ現在値を復元する。patch schema、DSP、engine version、通常UIは変更しない
+- 低音量試聴patchは引き続きMASTER 0.20以下、Delay / Reverb OFF、Insert OFFとし、物理出力未接続WASMで有限値・peak 0.25以下・release / panic後無音を検証する
+- 判断ページの`SERUM ORIGINAL`は、`tools/serve.mjs`のlocalhost限定・固定3件allowlistからインストール済み原本を`.SerumPreset`名でread-only streamする。任意パスを受けず、workspace／公開buildへ原本を複製しない。変換後の`SYNTHENGINE JSON`とは別の入口にする
+
+## M4auで確定した事項
+
+- Preset Bridgeの固定3候補へ`SYNTHENGINEで開く`を追加し、候補IDから固定したschema 1 JSONを既存validatorへ通して通常Synthへ一手で読み込む
+- 起動入力は`bridgePreset=pianofy|morpheus|neon-drive`だけを許可し、任意URL、filesystem path、JSON本文は受けない。未知ID、取得失敗、validation失敗ではEPianoを保持する
+- 明示した候補はautosaveより優先する。成功後は一度だけ使う`bridgePreset`をURL履歴から除き、通常のautosave規約へ戻す
+- 読み込み時にAudioContextのresume、note-on、output gate openを行わない。既存どおり鍵盤またはPCキーの明示操作まで出力をミュートする
+- `SERUM ORIGINAL / JSON保存 / MAPPING`は補助導線として保持し、他社音源との完全互換や音色一致は主張しない
+
+## M4avで確定した事項
+
+- Serum 2実画面とPianofy payloadの照合により、modulation source IDを`2 = ENV 1`、`3 = ENV 2`、`4 = ENV 3`、`5 = ENV 4`、`6 = LFO 1`、`17 = Note#`へ訂正する
+- `Oscillator module 3 / kParamVolume`をNoise Levelへ近似し、PianofyのENV 2でNoiseの短い発音層を開ける。Sub、OSC C、bipolar Note#、LFO curve / modeはまだ移さない
+- 有効VoiceFilterのDriveと、modeを明示できるTape Satだけを既存Distortionへまとめる。安全試聴profileはDrive 0.24以下、Mix 0.20以下、MASTER 0.20以下、Delay / Reverb OFFとする
+- FatはPianofyのdecoded plainParamsに値がなく、推測で補完しない。その他のFX algorithm、routing、curveもreport-onlyとする
+- report version 3へFX近似値と上限を追加し、旧候補を上書きせず`audition-mod-fx-v2/`へ出力する。patch schema、DSP、engine versionは変更しない
+
 ## 未決事項
 
 SPECにないため、以下は公開仕様として確定していません。括弧内は現在の挙動です。
@@ -494,3 +615,17 @@ make wasm WASM_CLANG=/opt/homebrew/opt/llvm/bin/clang
 node tools/wasm-check/compare.mjs build/synth_engine.wasm presets/m0_saw.txt fixtures/m0_events_chord.txt build/out.wav 48000 128 96000
 ```
 実測: 最大差 −133.6 dBFS、RMS差 −162 dBFS（M0 基準3を満たす）。注意: `synth_reset(ALL)` はパラメータを初期値へ戻すので、プリセット設定後は `reset(VOICES)` を使う。
+
+## M4aw EQ quality pass（2026-09-09）
+
+- 既存ID 99〜102と`LOW / MID / HIGH` UIを維持し、EQ内部を一次band splitから160 Hz low shelf／1.2 kHz Q 0.75 bell／6.8 kHz high shelfの直列biquadへ変更した。
+- 発音中の3 gainは既存と同じ5 ms時定数で平滑化する。無発音時の設定とreset時は目標へ直接合わせる。
+- EQ BYPASSとEQ ON・全gain 0 dBは旧PCMとビット一致。parameter count 121、patch schema 1、event ABIは不変で、enabled-EQ PCM変更によりengine versionは29。
+- core 82/82、Web 84/84、freestanding、WASM、全Insert有効時のnative/WASMビット一致、Apple arm64 compile-onlyを検証した。帯域応答の測定値と無出力安全ゲートは`SPEC_M4aw.md`と`PROJECT_NOTES.md`に記録する。
+
+## M4ax Parametric EQ controls / response（2026-09-10）
+
+- M4awの3 gainと旧patch音を維持し、末尾ID 121〜124へLow Frequency、Mid Frequency / Q、High Frequencyを追加した。parameter countは125、patch schema 1とevent ABIは維持し、engine versionを30へ更新した。
+- 4つの新操作も発音中は5 msで平滑化する。Webの`FILTER RESPONSE`はコアと同じRBJ係数と直列順序から160点を算出し、20 Hz〜20 kHz対数／−24〜+24 dB固定軸で表示する。
+- core 82/82、Web 79/79、freestanding、WASM、可変EQを含むnative/WASMビット一致、Apple arm64 compile-onlyを検証した。無出力WASM安全ゲートはFrequency / Q / Gainの両端切替を44.1／48／96 kHzで行い、最大peak 0.187265以下、release後3.92e-15以下、panic後0、NaN / Inf 0だった。
+- 390×844／1440×900のFX面はdesign-lintでNG 0／WARN 0／測定不可0、44px未満0件、最悪コントラスト8.10:1。物理出力、音楽的な帯域幅、Safari／実機タッチは本人確認待ち。仕様は`SPEC_M4ax.md`。

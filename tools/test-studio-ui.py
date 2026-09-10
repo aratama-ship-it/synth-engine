@@ -8,12 +8,14 @@ import math
 import struct
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 from playwright.sync_api import sync_playwright, expect
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--url", default="http://127.0.0.1:8963/shells/web/synth.html?m4t=1")
 parser.add_argument("--out", type=Path, default=Path("design/verify/m4t-wavetable-frame-position-20260908"))
 parser.add_argument("--design-lint", type=Path)
+parser.add_argument("--bridge-only", action="store_true")
 args = parser.parse_args()
 args.out.mkdir(parents=True, exist_ok=True)
 checks = []
@@ -40,6 +42,91 @@ def wavetable_wav(frame_count=1):
 
 with sync_playwright() as p:
     browser = p.chromium.launch()
+    target = urlsplit(args.url)
+    bridge_base = urlunsplit((target.scheme, target.netloc, target.path, "", ""))
+    bridge_candidates = {
+        "pianofy": "Serum 2 · LD - Pianofy",
+        "morpheus": "Serum 2 · BA - Morpheus",
+        "neon-drive": "Serum 2 · BA - Neon Drive",
+    }
+    for bridge_id, patch_name in bridge_candidates.items():
+        bridge_context = browser.new_context(viewport={"width": 1440, "height": 900}, service_workers="block")
+        bridge_page = bridge_context.new_page()
+        bridge_errors = []
+        bridge_page.on("pageerror", lambda error: bridge_errors.append(str(error)))
+        if bridge_id == "pianofy":
+            bridge_page.goto(f"{bridge_base}?m4av=1", wait_until="networkidle")
+            bridge_page.evaluate("""() => {
+                const key = "synth-engine.studio.autosave.v1";
+                const patch = JSON.parse(localStorage.getItem(key));
+                patch.name = "STALE AUTOSAVE";
+                localStorage.setItem(key, JSON.stringify(patch));
+            }""")
+        bridge_page.goto(
+            f"{bridge_base}?m4av=1&tab=osc&bridgePreset={bridge_id}",
+            wait_until="networkidle",
+        )
+        expect(bridge_page.locator("#status")).to_contain_text(f"{patch_name}をPreset Bridgeから読み込みました")
+        expect(bridge_page.locator("#status")).to_contain_text("出力はミュート中")
+        expect(bridge_page.locator("#preset option:checked")).to_contain_text(patch_name)
+        assert "bridgePreset" not in bridge_page.url
+        loaded_patch = bridge_page.evaluate("JSON.parse(localStorage.getItem('synth-engine.studio.autosave.v1'))")
+        assert loaded_patch["name"] == patch_name
+        loaded_core = dict(loaded_patch["core"])
+        assert loaded_core[7] <= 0.2
+        assert loaded_patch["space"]["delayOn"] is False
+        assert loaded_patch["space"]["reverbOn"] is False
+        assert loaded_patch["fx"]["modules"]["distortion"]["on"] is True
+        assert loaded_patch["fx"]["modules"]["distortion"]["drive"] <= 0.24
+        assert loaded_patch["fx"]["modules"]["distortion"]["mix"] <= 0.2
+        if bridge_id == "pianofy":
+            assert [(loaded_core[base], loaded_core[base + 1]) for base in range(55, 73, 3)] == [
+                (11, 8), (3, 7), (3, 1), (3, 2), (7, 14), (6, 8)
+            ]
+        assert not bridge_errors, bridge_errors
+        if bridge_id == "pianofy":
+            bridge_page.screenshot(path=str(args.out / "bridge-pianofy-1440.png"), full_page=True)
+            bridge_page.set_viewport_size({"width": 390, "height": 844})
+            assert bridge_page.evaluate("document.documentElement.scrollWidth") == 390
+            bridge_page.screenshot(path=str(args.out / "bridge-pianofy-390.png"), full_page=True)
+        bridge_context.close()
+    passed("Preset Bridge: three candidates override autosave, load in one action, stay muted, and clear the one-shot query")
+
+    unknown_context = browser.new_context(viewport={"width": 1440, "height": 900}, service_workers="block")
+    unknown_page = unknown_context.new_page()
+    unknown_requests = []
+    unknown_page.on("request", lambda request: unknown_requests.append(request.url))
+    unknown_page.goto(f"{bridge_base}?m4av=1&tab=osc&bridgePreset=unknown", wait_until="networkidle")
+    expect(unknown_page.locator("#status")).to_have_class("status error")
+    expect(unknown_page.locator("#status")).to_contain_text("未知のPreset Bridge候補")
+    expect(unknown_page.locator("#preset option:checked")).to_contain_text("EPiano")
+    assert "bridgePreset=unknown" in unknown_page.url
+    assert not any("audition-mod-fx-v2/unknown" in request for request in unknown_requests)
+    unknown_context.close()
+    passed("Preset Bridge: unknown IDs make no arbitrary preset request and keep EPiano")
+
+    safety_context = browser.new_context(service_workers="block")
+    safety_page = safety_context.new_page()
+    safety_url = urlunsplit((target.scheme, target.netloc, "/shells/web/tests/preset-bridge-fx-safety.html", "", ""))
+    safety_page.goto(safety_url, wait_until="networkidle")
+    expect(safety_page.locator("body")).to_have_attribute("data-status", "pass", timeout=30000)
+    safety_result = safety_page.evaluate("window.__PRESET_BRIDGE_FX_SAFETY_RESULT__")
+    assert safety_result["physicalOutput"].startswith("not connected")
+    assert all(item["all"]["peak"] <= 0.25 for item in safety_result["results"])
+    assert all(item["tail"]["peak"] <= 1e-7 for item in safety_result["results"])
+    safety_context.close()
+    passed("Preset Bridge: three safe distortion candidates render offline within peak and release-tail ceilings")
+
+    if args.bridge_only:
+        browser.close()
+        (args.out / "interaction-results.json").write_text(json.dumps({
+            "time": datetime.now().isoformat(),
+            "checks": checks,
+            "errors": [],
+        }, ensure_ascii=False, indent=2) + "\n")
+        print(f"{len(checks)} groups passed; artifacts: {args.out}")
+        raise SystemExit(0)
+
     context = browser.new_context(viewport={"width": 1440, "height": 900}, service_workers="block")
     page = context.new_page()
     errors = []

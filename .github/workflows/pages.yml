@@ -56,6 +56,7 @@ jobs:
             shells/web/match-audio.js \
             shells/web/envelope-match.js \
             shells/web/filter-match.js \
+            shells/web/eq-response.js \
             shells/web/note-registry.js \
             shells/web/keyboard-input.js \
             shells/web/wavetable-import.js \
@@ -63,6 +64,7 @@ jobs:
           cp presets/*.txt _site/presets/
           cp build/synth_engine.wasm _site/build/
           test -s _site/build/synth_engine.wasm
+          test -s _site/shells/web/eq-response.js
           test "$(find _site -type l | wc -l)" -eq 0
           sha256sum _site/build/synth_engine.wasm
 

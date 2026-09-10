@@ -1,17 +1,18 @@
 import { createSynthNode, getParams, parsePreset } from "./synth-node.js";
 import { REVERB_MATERIALS, SPACE_DEFAULTS, createSpaceEffects } from "./space-effects.js";
-import { MOD_DEST_BY_PARAM, MOD_DESTINATIONS, MOD_SOURCES, findAssignmentSlot, modulationAmountLabel, modulationSlotIds } from "./mod-matrix.js";
-import { FX_CORE_PARAM_IDS, FX_DEFAULTS, FX_IDS, fxCoreParams } from "./fx-rack.js";
-import { MAX_USER_PATCHES, createPatchHistory, createPatchSnapshot, parsePatch, serializePatch, validatePatch } from "./patch-state.js";
+import { MOD_DEST_BY_PARAM, MOD_DESTINATIONS, MOD_SOURCES, findAssignmentSlot, modulationAmountLabel, modulationSlotIds } from "./mod-matrix.js?m4ao=1";
+import { FX_CORE_PARAM_IDS, FX_DEFAULTS, FX_IDS, fxCoreParams } from "./fx-rack.js?m4ax=1";
+import { MAX_USER_PATCHES, createPatchHistory, createPatchSnapshot, parsePatch, serializePatch, validatePatch } from "./patch-state.js?m4ax=1";
 import { analyzeSound } from "./sound-analysis.js";
 import { MATCH_TARGET_RMS_DBFS, candidateRenderPlan, compareSoundAnalyses, levelMatchGain } from "./match-audio.js";
 import { suggestAmpEnvelope } from "./envelope-match.js";
-import { estimateFilterCutoff, planFilterCutoffProbe } from "./filter-match.js";
+import { estimateFilterCutoff, planFilterCutoffProbe } from "./filter-match.js?m4ax=1";
 import { createNoteRegistry } from "./note-registry.js";
+import { eqResponsePath } from "./eq-response.js?m4ax=1";
 import { createSafeWavetableFrame, parseWavetableWav, wavetableFramePosition } from "./wavetable-import.js?m4t=1";
 import { clampKeyboardOctave, keyboardInputId, keyboardOctaveLabel, noteForKeyboardEvent, octaveDeltaForKeyboardEvent } from "./keyboard-input.js?m4s=1";
 
-const paths = { wasm: "../../build/synth_engine.wasm?m4r=1", presets: "../../presets/" };
+const paths = { wasm: "../../build/synth_engine.wasm?m4ax=1", presets: "../../presets/" };
 const presets = Object.freeze({
   epiano: { label:"EPiano", file:"rsk_epiano.txt", description:"やわらかい電気鍵盤", space:{ reverbDecay:1.8 } },
   saw: { label:"Saw", file:"rsk_saw.txt", description:"ユニゾンのある鋸歯波", space:{ reverbDecay:1.6 } },
@@ -24,16 +25,38 @@ const presets = Object.freeze({
   motionLead: { label:"Motion Lead", file:"studio_motion_lead.txt", description:"ゆっくり表情が動くリード", space:{ delayOn:true, delayFeedback:.36, delayMix:.12, delayTime:.32, reverbOn:true, reverbMix:.2, reverbMaterial:"grain", reverbDecay:1.5 } },
   airKeys: { label:"Air Keys", file:"studio_air_keys.txt", description:"空気感を残す鍵盤音", space:{ delayOn:false, delayMix:.08, delayTime:.36, reverbOn:true, reverbMix:.3, reverbMaterial:"warm", reverbDecay:2, reverbHighCut:7200 } },
 });
+const bridgeAuditionPresets = Object.freeze({
+  pianofy:"/design/preset-bridge-20260909/audition-mod-fx-v2/pianofy.synthengine.json",
+  morpheus:"/design/preset-bridge-20260909/audition-mod-fx-v2/morpheus-bass.synthengine.json",
+  "neon-drive":"/design/preset-bridge-20260909/audition-mod-fx-v2/neon-drive-sync.synthengine.json",
+});
 const presetCategories = Object.freeze({ epiano:"Keys", saw:"Lead", pluck:"Pluck", bell:"Bell", widePad:"Pad", warmBass:"Bass", glassBell:"Bell", brightPluck:"Pluck", motionLead:"Lead", airKeys:"Keys" });
 const CUSTOM_WAVETABLE_SLOT = 4;
 const wavetableNames = Object.freeze(["Basic Shapes", "Analog Sweep", "Digital Edge", "Hollow Formant", "Custom · Session"]);
+const filterModeNames = Object.freeze(["LP12", "BP12", "HP12", "NOTCH", "LP24", "HP24"]);
+const unisonDensityModes = Object.freeze([
+  { id:"focus", effective:2, density:0, detail:"inner pair only" },
+  { id:"balanced", effective:3, density:Math.sqrt(.5), detail:"outer pair −3 dB" },
+  { id:"full", effective:4, density:1, detail:"original four-voice balance" },
+  { id:"wide", effective:5, density:Math.sqrt(1.5), detail:"outer pair +1.8 dB" },
+]);
+const oscWarpModes = Object.freeze([
+  { id:"bend-negative", amount:-.75, label:"BEND -", detail:"outward" },
+  { id:"off", amount:0, label:"OFF", detail:"original" },
+  { id:"bend-positive", amount:.75, label:"BEND +", detail:"inward" },
+]);
+const oscWarpSurfaces = Object.freeze([
+  { slot:"a", label:"A", paramId:117, modeParamId:119 },
+  { slot:"b", label:"B", paramId:118, modeParamId:120 },
+]);
+const oscWarpModeNames = Object.freeze(["bend", "asym", "sync"]);
 const groups = Object.freeze({
   "global-controls": [{ id: 7, label: "MASTER" }],
-  "voice-controls": [{ id: 8, label: "VOICES" }],
+  "voice-controls": [{ id: 8, label: "VOICES" }, { id: 113, label: "MODE", type: "select", options: ["POLY", "MONO", "LEGATO"], releaseKeyboardFocus:true }, { id: 114, label: "GLIDE" }],
   "osc-a": [{ id: 0, label: "WAVE", type: "select", options: wavetableNames }, { id: 1, label: "POS" }, { id: 2, label: "LEVEL" }, { id: 9, label: "UNISON" }, { id: 10, label: "DETUNE" }, { id: 11, label: "WIDTH" }, { id: 12, label: "OCT" }, { id: 13, label: "SEMI" }, { id: 14, label: "FINE" }],
   "osc-b": [{ id: 17, label: "WAVE", type: "select", options: wavetableNames }, { id: 18, label: "POS" }, { id: 19, label: "LEVEL" }, { id: 20, label: "UNISON" }, { id: 21, label: "DETUNE" }, { id: 22, label: "WIDTH" }, { id: 23, label: "OCT" }, { id: 24, label: "SEMI" }, { id: 25, label: "FINE" }],
   mix: [{ id: 28, label: "FM B → A" }, { id: 29, label: "SUB" }, { id: 30, label: "SUB WAVE", type: "select", options: ["Sine", "Square", "Triangle"] }, { id: 31, label: "SUB OCT" }, { id: 32, label: "NOISE" }, { id: 33, label: "NOISE COLOR", type: "select", options: ["White", "Pink"] }, { id: 34, label: "NOISE DECAY" }],
-  filter: [{ id: 35, label: "ON", type: "toggle" }, { id: 36, label: "MODE", type: "select", options: ["LP12", "LP24", "BP12", "BP24", "HP12", "NOTCH"] }, { id: 37, label: "CUTOFF", scale: "log" }, { id: 38, label: "RESONANCE" }, { id: 39, label: "KEY TRACK" }, { id: 40, label: "ENV AMOUNT" }],
+  filter: [{ id: 35, label: "ON", type: "toggle" }, { id: 36, label: "MODE", type: "select", options: filterModeNames }, { id: 37, label: "CUTOFF", scale: "log" }, { id: 38, label: "RESONANCE" }, { id: 39, label: "KEY TRACK" }, { id: 40, label: "ENV AMOUNT" }],
   amp: [{ id: 3, label: "ATTACK" }, { id: 4, label: "DECAY" }, { id: 5, label: "SUSTAIN" }, { id: 6, label: "RELEASE" }, { id: 53, label: "CURVE" }],
   "filter-eg": [{ id: 41, label: "ATTACK" }, { id: 42, label: "DECAY" }, { id: 43, label: "SUSTAIN" }, { id: 44, label: "RELEASE" }, { id: 54, label: "CURVE" }],
   mod: [{ id: 46, label: "RATE", scale: "log" }, { id: 47, label: "SHAPE", type: "select", options: ["Sine", "Triangle", "Saw Up", "Saw Down", "Square", "S&H"] }, { id: 48, label: "RETRIGGER", type: "toggle", toggleLabel: "RETRIG" }, { id: 49, label: "TO FILTER" }, { id: 50, label: "TO PITCH" }, { id: 51, label: "TO AMP" }, { id: 52, label: "PHASE" }],
@@ -42,17 +65,20 @@ const groups = Object.freeze({
   "performance-macros": [{ id: 73, label: "MACRO 1" }, { id: 74, label: "MACRO 2" }, { id: 83, label: "MACRO 3" }, { id: 84, label: "MACRO 4" }],
 });
 const primaryIds = new Set(Object.values(groups).flat().map((control) => control.id));
-const qualityParamIds = new Set([76, 77, 78]);
+const qualityParamIds = new Set([76, 77, 78, 115, 116, 117, 118, 119, 120]);
 const insertFxParamIds = new Set([
   ...FX_IDS.flatMap((id) => Object.values(FX_CORE_PARAM_IDS[id])),
   ...FX_CORE_PARAM_IDS.order,
 ]);
 const elements = Object.fromEntries([...document.querySelectorAll("[id]")].map((element) => [element.id, element]));
 const urlParams = new URLSearchParams(window.location.search);
+const isLocalPreview = ["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname);
+elements["preset-bridge"].hidden = !isLocalPreview;
 elements["quality-lab"].hidden = urlParams.get("quality") !== "1";
 const parameterInfo = new Map();
 const values = new Map();
 const controlsById = new Map();
+const lastNonZeroWarp = new Map(oscWarpSurfaces.map(({ paramId }) => [paramId, .75]));
 const noteRegistry = createNoteRegistry();
 const pointerNoteTokens = new Map();
 const activeKeyboardTokens = new Map();
@@ -63,6 +89,7 @@ let context;
 let synth;
 let audioReady;
 let outputGate;
+let audioSuspension;
 let spaceEffects;
 const customWavetable = { frames:null, frameCount:0, sampleRate:0, name:"" };
 let customWavetableBusy = false;
@@ -104,7 +131,7 @@ let applyingMatchFilterSuggestion = false;
 function setStatus(message, error = false) { elements.status.textContent = message; elements.status.classList.toggle("error", error); }
 function formatValue(parameter, value) {
   const lfoShapes = ["Sine", "Triangle", "Saw Up", "Saw Down", "Square", "S&H"];
-  const discrete = { 0:wavetableNames, 17:wavetableNames, 30:["Sine", "Square", "Triangle"], 33:["White", "Pink"], 36:["LP12", "LP24", "BP12", "BP24", "HP12", "Notch"], 47:lfoShapes, 80:lfoShapes };
+  const discrete = { 0:wavetableNames, 17:wavetableNames, 30:["Sine", "Square", "Triangle"], 33:["White", "Pink"], 36:filterModeNames, 47:lfoShapes, 80:lfoShapes };
   if (discrete[parameter.id]) return discrete[parameter.id][Math.round(value)];
   if ([35, 48, 81].includes(parameter.id)) return value >= .5 ? "ON" : "OFF";
   if (parameter.id === 37) return `${Math.round(value).toLocaleString()} Hz`;
@@ -112,6 +139,7 @@ function formatValue(parameter, value) {
   if ((parameter.flags & 2) !== 0) return `${Number(value.toFixed(2))} s`;
   if ([10, 14, 21, 25, 50].includes(parameter.id)) return `${Math.round(value)} ct`;
   if ([13, 24].includes(parameter.id)) return `${Math.round(value)} st`;
+  if ([117, 118].includes(parameter.id)) return formatSignedPercent(value);
   if ([12, 23, 31, 40, 49].includes(parameter.id)) return `${Math.round(value)} oct`;
   if (matrixParamIds.has(parameter.id)) {
     const offset = (parameter.id - 55) % 3;
@@ -121,8 +149,10 @@ function formatValue(parameter, value) {
   }
   return Number(value.toFixed(3)).toString();
 }
+function formatSignedPercent(value) { const rounded = Math.round(value * 100); return `${rounded > 0 ? "+" : ""}${rounded}%`; }
 function rangeStep(parameter) { if ((parameter.flags & 1) !== 0) return 1; if (parameter.id === 37) return 0.001; return Math.max((parameter.max - parameter.min) / 500, 0.001); }
 function normalized(parameter, value) { return (value - parameter.min) / Math.max(parameter.max - parameter.min, Number.EPSILON); }
+function normalizedParameterValue(parameter, value) { const bounded = Math.min(parameter.max, Math.max(parameter.min, value)); return (parameter.flags & 1) !== 0 ? Math.round(bounded) : bounded; }
 function valueForInput(parameter, control, inputValue) { if (control.scale !== "log") return Number(inputValue); const low = Math.log(parameter.min); const high = Math.log(parameter.max); return Math.exp(low + Number(inputValue) * (high - low)); }
 function inputForValue(parameter, control, value) { if (control.scale !== "log") return value; return (Math.log(value) - Math.log(parameter.min)) / (Math.log(parameter.max) - Math.log(parameter.min)); }
 
@@ -137,12 +167,13 @@ function updateControl(id) {
     if (control.kind !== "dial") control.output.textContent = formatValue(parameter, value);
   }
   updateVisuals(id);
-  if ([9, 15, 20, 26, 76, 77, 78].includes(id)) syncQualityLab();
+  syncOscWarpSurface(id);
+  if ([9, 15, 20, 26, 76, 77, 78, 115, 116, 117, 118, 119, 120].includes(id)) syncQualityLab();
 }
 function setValue(id, value) {
   const parameter = parameterInfo.get(id); const numeric = Number(value);
   if (!parameter || !Number.isFinite(numeric)) return false;
-  const next = Math.min(parameter.max, Math.max(parameter.min, numeric));
+  const next = normalizedParameterValue(parameter, numeric);
   if ([0, 17].includes(id) && Math.round(next) === CUSTOM_WAVETABLE_SLOT && !customWavetable.frames) {
     updateControl(id);
     elements["wavetable-import-state"].textContent = "LOAD WAV FIRST";
@@ -158,8 +189,41 @@ function setQualityPressed(button, pressed) {
   button.setAttribute("aria-pressed", String(pressed));
   button.classList.toggle("is-selected", pressed);
 }
+function syncOscWarpSurface(id) {
+  const surface = oscWarpSurfaces.find(({ paramId, modeParamId }) => paramId === id || modeParamId === id);
+  if (!surface || !elements[`osc-warp-mode-${surface.slot}`]) return;
+  const amount = values.get(surface.paramId) ?? 0;
+  const modeIndex = Math.min(2, Math.max(0, Math.round(values.get(surface.modeParamId) ?? 0)));
+  const mode = oscWarpModeNames[modeIndex];
+  const active = Math.abs(amount) > 1e-6;
+  if (active) lastNonZeroWarp.set(surface.paramId, amount);
+  elements[`osc-warp-mode-${surface.slot}`].value = active ? mode : "off";
+  const ratio = Math.pow(2, 2 * amount);
+  const detail = mode === "sync"
+    ? `${amount < 0 ? "stretch" : "compress"} ×${ratio.toFixed(2)}`
+    : mode === "asym"
+      ? (amount < 0 ? "backward" : "forward")
+      : (amount < 0 ? "outward" : "inward");
+  elements[`osc-warp-state-${surface.slot}`].textContent = active
+    ? `${mode.toUpperCase()} ${formatSignedPercent(amount)} · ${detail}`
+    : "OFF · original";
+}
+function installOscWarpSurface() {
+  for (const surface of oscWarpSurfaces) {
+    const select = elements[`osc-warp-mode-${surface.slot}`];
+    select.addEventListener("change", () => {
+      const selectedMode = select.value;
+      const amount = selectedMode === "off" ? 0 : lastNonZeroWarp.get(surface.paramId) ?? .75;
+      if (selectedMode !== "off") setValue(surface.modeParamId, oscWarpModeNames.indexOf(selectedMode));
+      setValue(surface.paramId, amount);
+      select.blur();
+      setStatus(`OSC ${surface.label}のWarpを${amount === 0 ? "OFF" : `${selectedMode.toUpperCase()} ${formatSignedPercent(amount)}`}へ切り替えました。発音は止めず、5 msで滑らかに移行します。`);
+    });
+    syncOscWarpSurface(surface.paramId);
+  }
+}
 function syncQualityLab() {
-  if (!parameterInfo.has(78)) return;
+  if (!parameterInfo.has(120)) return;
   const fourVoices = Math.round(values.get(9)) === 4 && Math.round(values.get(20)) === 4;
   const legacyUnison = fourVoices && Math.round(values.get(15)) === 0 && Math.round(values.get(26)) === 0 &&
     Math.round(values.get(76)) === 0 && Math.round(values.get(77)) === 0;
@@ -176,12 +240,51 @@ function syncQualityLab() {
   elements["fm-quality-state"].textContent = fmHq
     ? "Full depth below guard · reduced high folds"
     : "Full depth · legacy spectrum";
+  const densityA = values.get(115) ?? 1;
+  const densityB = values.get(116) ?? 1;
+  const effectiveLayers = (density) => 2 + 2 * density * density;
+  const linked = Math.abs(densityA - densityB) < 1e-6;
+  const selectedMode = linked ? unisonDensityModes.find((mode) =>
+    Math.abs(densityA - mode.density) < 1e-5) : undefined;
+  unisonDensityModes.forEach((mode) => setQualityPressed(
+    elements[`unison-density-${mode.id}`], selectedMode?.id === mode.id));
+  elements["unison-density-state"].textContent = selectedMode
+    ? `${selectedMode.effective.toFixed(1)} · ${selectedMode.detail}`
+    : linked ? `CUSTOM ${effectiveLayers(densityA).toFixed(1)} · energy normalized`
+      : `A ${effectiveLayers(densityA).toFixed(1)} / B ${effectiveLayers(densityB).toFixed(1)} · choose a mode to link`;
+  const warpA = values.get(117) ?? 0;
+  const warpB = values.get(118) ?? 0;
+  const warpModeA = Math.round(values.get(119) ?? 0);
+  const warpModeB = Math.round(values.get(120) ?? 0);
+  const warpLinked = Math.abs(warpA - warpB) < 1e-6;
+  const bendLinked = warpModeA === 0 && warpModeB === 0;
+  const selectedWarp = warpLinked && bendLinked ? oscWarpModes.find((mode) =>
+    Math.abs(warpA - mode.amount) < 1e-5) : undefined;
+  oscWarpModes.forEach((mode) => setQualityPressed(
+    elements[`osc-warp-${mode.id}`], selectedWarp?.id === mode.id));
+  const percent = (amount) => `${amount >= 0 ? "+" : ""}${Math.round(amount * 100)}%`;
+  elements["osc-warp-state"].textContent = selectedWarp
+    ? `A/B ${percent(selectedWarp.amount)} · ${selectedWarp.detail}`
+    : warpLinked && warpModeA === warpModeB ? `A/B ${percent(warpA)} · custom ${oscWarpModeNames[warpModeA] ?? "bend"}`
+      : `A ${percent(warpA)} / B ${percent(warpB)} · choose a mode to link`;
 }
 function applyQualityValues(updates, message) {
   stopAllNotes();
   updates.forEach(([id, value]) => setValue(id, value));
   synth?.reset(1);
   setStatus(`${message}。同じ鍵盤をもう一度弾いて比較してください。`);
+}
+function applyUnisonDensityMode(mode) {
+  setValue(115, mode.density);
+  setValue(116, mode.density);
+  setStatus(`4声ユニゾン密度を${mode.effective.toFixed(1)} ${mode.id === "wide" ? "WIDE+" : mode.id.toUpperCase()}へ切り替えました。実声数と最大同時発音VOICESは整数のままです。`);
+}
+function applyOscWarpMode(mode) {
+  setValue(119, 0);
+  setValue(120, 0);
+  setValue(117, mode.amount);
+  setValue(118, mode.amount);
+  setStatus(`OSC A/BのWarpを${mode.label}へ切り替えました。発音は止めず、5 msで滑らかに移行します。`);
 }
 function installQualityLab() {
   elements["unison-quality-legacy"].addEventListener("click", () => applyQualityValues(
@@ -194,6 +297,10 @@ function installQualityLab() {
     [[78, 0]], "FM高域処理をLegacyへ切り替えました"));
   elements["fm-quality-hq"].addEventListener("click", () => applyQualityValues(
     [[78, 1]], "FM高域処理をHQ Guardへ切り替えました"));
+  unisonDensityModes.forEach((mode) => elements[`unison-density-${mode.id}`]
+    .addEventListener("click", () => applyUnisonDensityMode(mode)));
+  oscWarpModes.forEach((mode) => elements[`osc-warp-${mode.id}`]
+    .addEventListener("click", () => applyOscWarpMode(mode)));
   syncQualityLab();
 }
 
@@ -293,7 +400,7 @@ function createControl(definition, advanced = false) {
   const output = document.createElement("output"); output.className = "control-value";
   if (definition.type === "select") {
     field.classList.add("control-select");
-    const input = document.createElement("select"); input.setAttribute("aria-label", parameter.displayName); definition.options.forEach((name, index) => { const option = new Option(name, String(index)); input.add(option); }); input.addEventListener("change", () => setValue(parameter.id, Number(input.value))); field.append(label, input, output); registerControl(parameter.id, { kind:"select", input, output, definition });
+    const input = document.createElement("select"); input.setAttribute("aria-label", parameter.displayName); definition.options.forEach((name, index) => { const option = new Option(name, String(index)); input.add(option); }); input.addEventListener("change", () => { setValue(parameter.id, Number(input.value)); if (definition.releaseKeyboardFocus) input.blur(); }); field.append(label, input, output); registerControl(parameter.id, { kind:"select", input, output, definition });
   } else if (definition.type === "toggle") {
     field.classList.add("control-toggle");
     const toggle = document.createElement("label"); toggle.className = "toggle"; const input = document.createElement("input"); input.type = "checkbox"; input.setAttribute("aria-label", parameter.displayName); const text = document.createElement("span"); text.textContent = definition.toggleLabel ?? definition.label; input.addEventListener("change", () => setValue(parameter.id, input.checked ? 1 : 0)); toggle.append(input, text); field.append(label, toggle, output); registerControl(parameter.id, { kind:"toggle", input, output, definition });
@@ -395,13 +502,36 @@ function graphPath(width, height, sample, count = 180) {
   }
   return points.join(" ");
 }
-function renderWaveform(svgId, slotId, positionId) {
+function oscillatorWarpPhase(phase, amount, mode) {
+  if (amount === 0) return phase;
+  const cycle = Math.floor(phase);
+  const localPhase = phase - cycle;
+  if (mode === 2) {
+    const ratio = Math.pow(2, 2 * amount);
+    return cycle + ((localPhase * ratio) % 1 + 1) % 1;
+  }
+  const shape = mode === 1
+    ? localPhase * (1 - localPhase)
+    : Math.sin(Math.PI * 2 * localPhase) / (Math.PI * 2);
+  return cycle + localPhase + .85 * amount * shape;
+}
+function renderWaveform(svgId, slotId, positionId, warpId, warpModeId) {
   const svg = elements[svgId];
   if (!svg || !values.has(slotId)) return;
   const slot = Math.round(values.get(slotId));
   const position = values.get(positionId) ?? 0;
-  svg.querySelector(".wave-line").setAttribute("d", graphPath(520, 152, (x) => oscillatorSample(slot, position, x * 2)));
-  svg.setAttribute("aria-label", `${wavetableNames[slot]}、position ${Math.round(position * 100)}% の設定波形`);
+  const warp = values.get(warpId) ?? 0;
+  const warpMode = Math.round(values.get(warpModeId) ?? 0);
+  svg.querySelector(".wave-line").setAttribute("d", graphPath(520, 152, (x) =>
+    oscillatorSample(slot, position, oscillatorWarpPhase(x * 2, warp, warpMode))));
+  const direction = warp === 0
+    ? "Warp off"
+    : warpMode === 2
+      ? `Sync ${warp > 0 ? "plus compress" : "minus stretch"} ratio ${Math.pow(2, 2 * warp).toFixed(2)}`
+      : warpMode === 1
+        ? `Asym ${warp > 0 ? "plus forward" : "minus backward"}`
+        : `Bend ${warp > 0 ? "plus inward" : "minus outward"}`;
+  svg.setAttribute("aria-label", `${wavetableNames[slot]}、position ${Math.round(position * 100)}%、${direction} ${Math.round(warp * 100)}% の設定波形`);
 }
 function customFramePositionLabel(position) {
   if (position.frameCount === 1) return "F1 · FIXED";
@@ -493,8 +623,8 @@ function renderLfo(svgId, shapeId, phaseId, label) {
   svg.setAttribute("aria-label", `${label} · ${["Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Sample and Hold"][shape]}の設定形状`);
 }
 function updateVisuals(id) {
-  if ([0, 1].includes(id)) renderWaveform("wave-a", 0, 1);
-  if ([17, 18].includes(id)) renderWaveform("wave-b", 17, 18);
+  if ([0, 1, 117, 119].includes(id)) renderWaveform("wave-a", 0, 1, 117, 119);
+  if ([17, 18, 118, 120].includes(id)) renderWaveform("wave-b", 17, 18, 118, 120);
   if ([0, 1, 17, 18].includes(id)) renderCustomWavetableFramePositions();
   if ([3, 4, 5, 6, 53].includes(id)) renderEnvelope("env-amp-graph", [3, 4, 5, 6, 53]);
   if ([41, 42, 43, 44, 54].includes(id)) renderEnvelope("env-filter-graph", [41, 42, 43, 44, 54]);
@@ -988,17 +1118,57 @@ function createEffectSelect(id, label, options) {
 const insertDefinitions = Object.freeze({
   distortion:{ label:"DISTORTION", color:"#F2A26B", controls:[{id:"drive",label:"DRIVE",min:0,max:1},{id:"tone",label:"TONE",min:800,max:18000},{id:"mix",label:"MIX",min:0,max:1}] },
   chorus:{ label:"CHORUS", color:"#68C7BB", controls:[{id:"rate",label:"RATE",min:.05,max:5},{id:"depth",label:"DEPTH",min:0,max:1},{id:"width",label:"WIDTH",min:0,max:1},{id:"mix",label:"MIX",min:0,max:.65}] },
-  eq:{ label:"3-BAND EQ", color:"#DCE95A", controls:[{id:"low",label:"LOW",min:-18,max:18},{id:"mid",label:"MID",min:-18,max:18},{id:"high",label:"HIGH",min:-18,max:18}] },
+  eq:{ label:"3-BAND EQ", color:"#DCE95A", controls:[
+    {id:"lowFrequency",label:"LOW FREQ",min:40,max:600,scale:"log"},
+    {id:"low",label:"LOW GAIN",min:-18,max:18},
+    {id:"midFrequency",label:"MID FREQ",min:200,max:8000,scale:"log"},
+    {id:"midQ",label:"MID Q",min:.25,max:8},
+    {id:"mid",label:"MID GAIN",min:-18,max:18},
+    {id:"highFrequency",label:"HIGH FREQ",min:1500,max:18000,scale:"log"},
+    {id:"high",label:"HIGH GAIN",min:-18,max:18},
+  ] },
   compressor:{ label:"COMPRESSOR", color:"#F5F0E8", controls:[{id:"threshold",label:"THRESH",min:-60,max:0},{id:"ratio",label:"RATIO",min:1,max:20},{id:"attack",label:"ATTACK",min:.001,max:.2},{id:"release",label:"RELEASE",min:.03,max:1},{id:"makeup",label:"MAKEUP",min:0,max:12}] },
 });
 function formatInsertValue(effect, id, value) {
   if (["mix", "drive", "depth", "width"].includes(id)) return `${Math.round(value * 100)}%`;
-  if (id === "tone") return `${Math.round(value).toLocaleString()} Hz`;
+  if (id === "tone" || id.endsWith("Frequency")) return value >= 1000 ? `${Number((value / 1000).toFixed(2))} kHz` : `${Math.round(value)} Hz`;
   if (["low", "mid", "high", "threshold", "makeup"].includes(id)) return `${value > 0 ? "+" : ""}${Number(value.toFixed(1))} dB`;
   if (id === "ratio") return `${Number(value.toFixed(1))}:1`;
+  if (id === "midQ") return `Q ${Number(value.toFixed(2))}`;
   if (id === "rate") return `${Number(value.toFixed(2))} Hz`;
   if (id === "attack" || id === "release") return `${Math.round(value * 1000)} ms`;
   return Number(value.toFixed(3)).toString();
+}
+function insertSliderPosition(control, value) {
+  if (control.scale !== "log") return Number(value);
+  return Math.log(Number(value) / control.min) / Math.log(control.max / control.min);
+}
+function insertSliderValue(control, position) {
+  if (control.scale !== "log") return Number(position);
+  return control.min * (control.max / control.min) ** Number(position);
+}
+function createEqResponse(module) {
+  const namespace = "http://www.w3.org/2000/svg";
+  const container = document.createElement("figure"); container.className = "eq-response";
+  const caption = document.createElement("figcaption"); caption.textContent = "FILTER RESPONSE · SETTING";
+  const svg = document.createElementNS(namespace, "svg"); svg.classList.add("eq-response-plot"); svg.setAttribute("viewBox", "0 0 480 144"); svg.setAttribute("role", "img");
+  const grid = document.createElementNS(namespace, "g"); grid.classList.add("eq-response-grid");
+  const xForFrequency = (frequency) => 12 + Math.log10(frequency / 20) / 3 * 456;
+  for (const frequency of [100, 1000, 10000]) { const line = document.createElementNS(namespace, "line"); const x = xForFrequency(frequency); line.setAttribute("x1", x); line.setAttribute("x2", x); line.setAttribute("y1", "12"); line.setAttribute("y2", "132"); grid.append(line); }
+  for (const y of [12, 72, 132]) { const line = document.createElementNS(namespace, "line"); line.setAttribute("x1", "12"); line.setAttribute("x2", "468"); line.setAttribute("y1", y); line.setAttribute("y2", y); if (y === 72) line.classList.add("eq-response-zero"); grid.append(line); }
+  const path = document.createElementNS(namespace, "path"); path.classList.add("eq-response-line");
+  svg.append(grid, path);
+  const scale = document.createElement("div"); scale.className = "eq-response-scale"; scale.setAttribute("aria-hidden", "true"); scale.innerHTML = "<span>100 Hz</span><span>1 kHz</span><span>10 kHz</span>";
+  const summary = document.createElement("p"); summary.className = "eq-response-summary";
+  const update = () => {
+    path.setAttribute("d", eqResponsePath(module));
+    const low = `${formatInsertValue("eq", "lowFrequency", module.lowFrequency)} ${formatInsertValue("eq", "low", module.low)}`;
+    const mid = `${formatInsertValue("eq", "midFrequency", module.midFrequency)} ${formatInsertValue("eq", "midQ", module.midQ)} ${formatInsertValue("eq", "mid", module.mid)}`;
+    const high = `${formatInsertValue("eq", "highFrequency", module.highFrequency)} ${formatInsertValue("eq", "high", module.high)}`;
+    const label = `3-band EQ response: Low ${low}, Mid ${mid}, High ${high}`;
+    svg.setAttribute("aria-label", label); summary.textContent = `LOW ${low} · MID ${mid} · HIGH ${high}`;
+  };
+  container.append(caption, svg, scale, summary); update(); return { element:container, update };
 }
 function applyInsertPatch(id, patch) {
   try { Object.assign(fxValues.modules[id], patch); syncInsertFxCore(); }
@@ -1029,12 +1199,15 @@ function renderInsertRack() {
     toggle.setAttribute("aria-label", `${definition.label} 有効`);
     const up = document.createElement("button"); up.type = "button"; up.className = "insert-move"; up.dataset.direction = "-1"; up.textContent = "↑"; up.disabled = index === 0; up.setAttribute("aria-label", `${definition.label}を前へ`); up.addEventListener("click", () => moveInsert(id, -1));
     const down = document.createElement("button"); down.type = "button"; down.className = "insert-move"; down.dataset.direction = "1"; down.textContent = "↓"; down.disabled = index === fxValues.order.length - 1; down.setAttribute("aria-label", `${definition.label}を後へ`); down.addEventListener("click", () => moveInsert(id, 1)); actions.append(toggle, up, down); header.append(title, actions);
+    const body = document.createElement("div"); body.className = "insert-body";
+    const response = id === "eq" ? createEqResponse(module) : undefined;
+    if (response) body.append(response.element);
     const controls = document.createElement("div"); controls.className = "insert-controls";
-    definition.controls.forEach((control) => { const field = document.createElement("label"); field.className = "insert-control"; const caption = document.createElement("span"); caption.textContent = control.label; const input = document.createElement("input"); input.type = "range"; input.min = String(control.min); input.max = String(control.max); input.step = String(Math.max((control.max - control.min) / 500, .001)); input.value = String(module[control.id]); input.setAttribute("aria-label", `${definition.label} ${control.label}`); const output = document.createElement("output"); output.textContent = formatInsertValue(id, control.id, module[control.id]); input.addEventListener("input", () => { const value = Number(input.value); module[control.id] = value; output.textContent = formatInsertValue(id, control.id, value); applyInsertPatch(id, { [control.id]:value }); }); input.addEventListener("dblclick", () => { const value = FX_DEFAULTS.modules[id][control.id]; input.value = String(value); module[control.id] = value; output.textContent = formatInsertValue(id, control.id, value); applyInsertPatch(id, { [control.id]:value }); }); field.append(caption, input, output); controls.append(field); });
-    card.append(header, controls); card.classList.toggle("is-on", module.on); elements["insert-rack"].append(card);
+    definition.controls.forEach((control) => { const field = document.createElement("label"); field.className = "insert-control"; const caption = document.createElement("span"); caption.textContent = control.label; const input = document.createElement("input"); input.type = "range"; input.min = control.scale === "log" ? "0" : String(control.min); input.max = control.scale === "log" ? "1" : String(control.max); input.step = control.scale === "log" ? ".002" : String(Math.max((control.max - control.min) / 500, .001)); input.value = String(insertSliderPosition(control, module[control.id])); input.setAttribute("aria-label", `${definition.label} ${control.label}`); const output = document.createElement("output"); output.textContent = formatInsertValue(id, control.id, module[control.id]); input.addEventListener("input", () => { const value = insertSliderValue(control, input.value); module[control.id] = value; output.textContent = formatInsertValue(id, control.id, value); applyInsertPatch(id, { [control.id]:value }); response?.update(); }); input.addEventListener("dblclick", () => { const value = FX_DEFAULTS.modules[id][control.id]; input.value = String(insertSliderPosition(control, value)); module[control.id] = value; output.textContent = formatInsertValue(id, control.id, value); applyInsertPatch(id, { [control.id]:value }); response?.update(); }); field.append(caption, input, output); controls.append(field); });
+    body.append(controls); card.append(header, body); card.classList.toggle("is-on", module.on); elements["insert-rack"].append(card);
   });
 }
-function renderControls() { Object.entries(groups).forEach(([target, definitions]) => { const container = elements[target]; definitions.filter((definition) => parameterInfo.has(definition.id)).forEach((definition) => container.append(createControl(definition))); }); renderInsertRack(); elements.delay.append(createEffectToggle("delayOn", "MODULE"), createEffectControl("delayTime", "TIME", .03, 1.5), createEffectControl("delayFeedback", "FEEDBACK", 0, .85), createEffectControl("delayTone", "TONE", 800, 18000), createEffectControl("delayMix", "MIX", 0, .65)); elements.reverb.append(createEffectToggle("reverbOn", "MODULE"), createEffectSelect("reverbMaterial", "MATERIAL", Object.entries(REVERB_MATERIALS).map(([id, material]) => [id, material.label])), createEffectControl("reverbSize", "SIZE", 0, 1), createEffectControl("reverbDecay", "DECAY", .3, 8), createEffectControl("reverbDamping", "DAMPING", 0, 1), createEffectControl("reverbPreDelay", "PRE-DELAY", 0, .1), createEffectControl("reverbLowCut", "LOW CUT", 20, 1000), createEffectControl("reverbHighCut", "HIGH CUT", 1000, 18000), createEffectControl("reverbWidth", "WIDTH", 0, 1), createEffectControl("reverbMix", "MIX", 0, .65)); renderMatrix(); const advanced = [...parameterInfo.values()].filter((parameter) => !primaryIds.has(parameter.id) && !matrixParamIds.has(parameter.id) && !qualityParamIds.has(parameter.id) && !insertFxParamIds.has(parameter.id)); advanced.forEach((parameter) => elements["advanced-controls"].append(createControl({ id:parameter.id, label:parameter.displayName }, true))); }
+function renderControls() { Object.entries(groups).forEach(([target, definitions]) => { const container = elements[target]; definitions.filter((definition) => parameterInfo.has(definition.id)).forEach((definition) => container.append(createControl(definition))); }); oscWarpSurfaces.forEach(({ slot, paramId }) => elements[`osc-warp-amount-${slot}`].append(createControl({ id:paramId, label:"AMOUNT" }))); renderInsertRack(); elements.delay.append(createEffectToggle("delayOn", "MODULE"), createEffectControl("delayTime", "TIME", .03, 1.5), createEffectControl("delayFeedback", "FEEDBACK", 0, .85), createEffectControl("delayTone", "TONE", 800, 18000), createEffectControl("delayMix", "MIX", 0, .65)); elements.reverb.append(createEffectToggle("reverbOn", "MODULE"), createEffectSelect("reverbMaterial", "MATERIAL", Object.entries(REVERB_MATERIALS).map(([id, material]) => [id, material.label])), createEffectControl("reverbSize", "SIZE", 0, 1), createEffectControl("reverbDecay", "DECAY", .3, 8), createEffectControl("reverbDamping", "DAMPING", 0, 1), createEffectControl("reverbPreDelay", "PRE-DELAY", 0, .1), createEffectControl("reverbLowCut", "LOW CUT", 20, 1000), createEffectControl("reverbHighCut", "HIGH CUT", 1000, 18000), createEffectControl("reverbWidth", "WIDTH", 0, 1), createEffectControl("reverbMix", "MIX", 0, .65)); renderMatrix(); const advanced = [...parameterInfo.values()].filter((parameter) => !primaryIds.has(parameter.id) && !matrixParamIds.has(parameter.id) && !qualityParamIds.has(parameter.id) && !insertFxParamIds.has(parameter.id)); advanced.forEach((parameter) => elements["advanced-controls"].append(createControl({ id:parameter.id, label:parameter.displayName }, true))); }
 function loadUserPatches() {
   try {
     const parsed = JSON.parse(localStorage.getItem(storageKeys.patches) ?? "[]");
@@ -1087,7 +1260,7 @@ function applyPatch(candidate, { resetHistory = false, message } = {}) {
     activePatchIdentity = { name:patch.name, category:patch.category };
     syncPresetIdentity(patch.name, patch.category);
     restoreDefaults();
-    for (const [id, value] of patch.core) { const parameter = parameterInfo.get(id); if (parameter) values.set(id, Math.min(parameter.max, Math.max(parameter.min, value))); }
+    for (const [id, value] of patch.core) { const parameter = parameterInfo.get(id); if (parameter) values.set(id, normalizedParameterValue(parameter, value)); }
     let customFallback = false;
     for (const id of [0, 17]) {
       if (Math.round(values.get(id)) === CUSTOM_WAVETABLE_SLOT && !customWavetable.frames) {
@@ -1137,6 +1310,20 @@ async function importPatchFile(file) {
   finally { elements["patch-file"].value = ""; }
 }
 
+async function loadBridgeAuditionPreset(id) {
+  if (!isLocalPreview) throw new Error("Preset Bridgeはlocalhost専用です");
+  if (!Object.hasOwn(bridgeAuditionPresets, id)) throw new RangeError("未知のPreset Bridge候補です");
+  const patch = parsePatch(await fetchChecked(bridgeAuditionPresets[id], "text"));
+  applyPatch(patch, {
+    resetHistory:true,
+    message:`${patch.name}をPreset Bridgeから読み込みました。出力はミュート中です。鍵盤またはPCキーを押すと開始します。`,
+  });
+  const cleanUrl = new URL(window.location.href);
+  cleanUrl.searchParams.delete("bridgePreset");
+  history.replaceState(history.state, "", cleanUrl);
+  return patch;
+}
+
 async function fetchChecked(url, type = "arrayBuffer") { const response = await fetch(url); if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`); return response[type](); }
 function restoreDefaults() { for (const parameter of parameterInfo.values()) values.set(parameter.id, parameter.default); [...values.keys()].forEach(updateControl); }
 async function loadPreset(id) {
@@ -1181,12 +1368,25 @@ function openOutputGate() {
 }
 function closeOutputGate() {
   if (!context || !outputGate) return;
+  const gain = outputGate.gain;
   const at = Number.isFinite(context.currentTime) ? context.currentTime : 0;
-  outputGate.gain.cancelScheduledValues?.(at);
-  outputGate.gain.value = 0;
+  gain.cancelScheduledValues?.(at);
+  if (typeof gain.setValueAtTime === "function") gain.setValueAtTime(0, at);
+  else gain.value = 0;
+}
+function suspendAudioContext() {
+  if (!context || context.state !== "running" || typeof context.suspend !== "function") return;
+  try {
+    const suspension = context.suspend().catch(() => {});
+    audioSuspension = suspension;
+    void suspension.then(() => { if (audioSuspension === suspension) audioSuspension = undefined; });
+  }
+  catch { /* The closed output gate remains the authoritative fallback. */ }
 }
 async function ensureAudio(shouldOpen = () => true) {
   const ready = prepareAudio();
+  const pendingSuspension = audioSuspension;
+  if (pendingSuspension) await pendingSuspension;
   const wasSuspended = context.state !== "running";
   const resumed = context.resume();
   const node = await ready;
@@ -1229,7 +1429,7 @@ function stopAllNotes() {
 function panicAudio({ broadcast = false } = {}) {
   stopAllNotes();
   try { synth?.reset(1); }
-  finally { closeOutputGate(); }
+  finally { closeOutputGate(); suspendAudioContext(); }
   if (broadcast) audioSessionChannel?.postMessage({ type:"panic", owner:audioSessionId });
 }
 function syncWavetableActions() {
@@ -1253,7 +1453,7 @@ async function clearCustomWavetable() {
     customWavetable.sampleRate = 0;
     customWavetable.name = "";
     visualFrameGain.clear();
-    renderWaveform("wave-a", 0, 1); renderWaveform("wave-b", 17, 18);
+    renderWaveform("wave-a", 0, 1, 117, 119); renderWaveform("wave-b", 17, 18, 118, 120);
     renderCustomWavetableFramePositions();
     elements["wavetable-import-state"].textContent = "NOT LOADED";
     elements["wavetable-import-state"].removeAttribute("title");
@@ -1288,7 +1488,7 @@ function installWavetableImport() {
       customWavetable.sampleRate = parsed.sampleRate;
       customWavetable.name = file.name;
       visualFrameGain.clear();
-      renderWaveform("wave-a", 0, 1); renderWaveform("wave-b", 17, 18);
+      renderWaveform("wave-a", 0, 1, 117, 119); renderWaveform("wave-b", 17, 18, 118, 120);
       renderCustomWavetableFramePositions();
       elements["wavetable-import-state"].textContent =
         `READY · ${parsed.frameCount}F · ${parsed.sampleRate.toLocaleString()} Hz`;
@@ -1379,7 +1579,7 @@ function bindKey(element, note) {
 }
 function installKeyboard() {
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") { panicAudio({ broadcast:true }); return; }
+    if (event.key === "Escape") { event.preventDefault(); panicAudio({ broadcast:true }); if (elements["mod-dialog"].open) elements["mod-dialog"].close(); return; }
     if (event.repeat || elements["mod-dialog"].open || !elements["patch-save-overlay"].hidden || event.target.matches('input:not([type="range"]),select,textarea')) return;
     const octaveDelta = octaveDeltaForKeyboardEvent(event);
     if (octaveDelta) { event.preventDefault(); shiftKeyboardOctave(octaveDelta); return; }
@@ -1407,7 +1607,13 @@ function installKeyboard() {
   document.addEventListener("visibilitychange", () => { if (document.hidden) panicAudio(); });
 }
 
+function emergencyStop() {
+  panicAudio({ broadcast:true });
+  setStatus("STOP SOUND — 出力をミュートし、全発音を停止しました。次の鍵盤入力で再開します。");
+}
 elements.init.addEventListener("click", () => { initPatch(); syncPresetIdentity("INIT", "Custom"); });
+elements["panic-audio"].addEventListener("pointerdown", emergencyStop);
+elements["panic-audio"].addEventListener("click", (event) => { if (event.detail === 0) emergencyStop(); });
 elements.preset.addEventListener("change", () => { const id = elements.preset.value; elements.preset.blur(); loadPreset(id).catch((error) => setStatus(error.message, true)); });
 elements["preset-search"].addEventListener("input", () => renderPresets()); elements["preset-category"].addEventListener("change", () => renderPresets());
 elements["save-patch"].addEventListener("click", openSavePanel);
@@ -1422,10 +1628,20 @@ elements["export-patch"].addEventListener("click", exportCurrentPatch); elements
 
 try {
   wasmBytes = await fetchChecked(paths.wasm); const parameters = await getParams(wasmBytes); parameters.forEach((parameter) => { parameterInfo.set(parameter.id, parameter); values.set(parameter.id, parameter.default); });
-  const savedAutosave = localStorage.getItem(storageKeys.autosave); loadUserPatches(); renderPresets(); renderControls(); renderPiano(); installTabs(); installEditorBanks(); installModDialog(); installQualityLab(); installWavetableImport(); installSoundMatch();
+  const savedAutosave = localStorage.getItem(storageKeys.autosave); loadUserPatches(); renderPresets(); renderControls(); renderPiano(); installTabs(); installEditorBanks(); installModDialog(); installQualityLab(); installOscWarpSurface(); installWavetableImport(); installSoundMatch();
   const requestedTab = urlParams.get("tab");
   if (tabOrder.includes(requestedTab)) selectTab(requestedTab);
   installAudioSession(); installKeyboard(); await loadPreset(elements.preset.value); patchHistory = createPatchHistory(capturePatch());
-  if (savedAutosave) { try { const restored = parsePatch(savedAutosave); applyPatch(restored, { resetHistory:true, message:`前回の自動保存「${restored.name}」を復元しました。` }); } catch (error) { setStatus(`自動保存は復元せず、EPianoを保持しました: ${error.message}`, true); } }
-  await prepareAudio(); updateHistoryButtons(); if (!elements.status.classList.contains("error") && !savedAutosave) setStatus("準備完了。鍵盤またはPCキーを押すと音源を開始します。");
+  const requestedBridgePreset = urlParams.get("bridgePreset");
+  let startupStatusSet = false;
+  if (requestedBridgePreset !== null) {
+    try { await loadBridgeAuditionPreset(requestedBridgePreset); }
+    catch (error) { setStatus(`Preset Bridge候補を読み込めません: ${error.message}。EPianoを保持しました。`, true); }
+    startupStatusSet = true;
+  } else if (savedAutosave) {
+    try { const restored = parsePatch(savedAutosave); applyPatch(restored, { resetHistory:true, message:`前回の自動保存「${restored.name}」を復元しました。` }); }
+    catch (error) { setStatus(`自動保存は復元せず、EPianoを保持しました: ${error.message}`, true); }
+    startupStatusSet = true;
+  }
+  await prepareAudio(); updateHistoryButtons(); if (!elements.status.classList.contains("error") && !startupStatusSet) setStatus("準備完了。鍵盤またはPCキーを押すと音源を開始します。");
 } catch (error) { setStatus(error.message, true); }
