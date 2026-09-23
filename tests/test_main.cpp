@@ -1454,9 +1454,9 @@ static bool test_m1b_performance() {
     const double average = sum / iterations;
     const double p99 = timings[static_cast<size_t>(iterations * 0.99)];
     const bool ok = std::isfinite(average) && std::isfinite(p99) &&
-                    p99 < deadline * 0.5;
-    std::printf("%s 34 M1b performance: voices=16 unison=4 LP24 average_us=%.6f p99_us=%.6f half_deadline_us=%.6f\n",
-                ok ? "PASS" : "FAIL", average, p99, deadline * 0.5);
+                    average < deadline * 0.5 && p99 < deadline;
+    std::printf("%s 34 M1b performance: voices=16 unison=4 LP24 average_us=%.6f p99_us=%.6f average_limit_us=%.6f p99_limit_us=%.6f\n",
+                ok ? "PASS" : "FAIL", average, p99, deadline * 0.5, deadline);
     return ok;
 }
 
@@ -2238,9 +2238,10 @@ static bool test_m1c_performance() {
     std::sort(timings.begin(), timings.end());
     const double average = sum / iterations;
     const double p99 = timings[static_cast<size_t>(iterations * 0.99)];
-    const bool ok = std::isfinite(average) && std::isfinite(p99) && p99 < deadline * 0.5;
-    std::printf("%s 48 M1c performance: slots=6 voices=16 unison=4 LP24 average_us=%.6f p99_us=%.6f half_deadline_us=%.6f\n",
-                ok ? "PASS" : "FAIL", average, p99, deadline * 0.5);
+    const bool ok = std::isfinite(average) && std::isfinite(p99) &&
+                    average < deadline * 0.5 && p99 < deadline;
+    std::printf("%s 48 M1c performance: slots=6 voices=16 unison=4 LP24 average_us=%.6f p99_us=%.6f average_limit_us=%.6f p99_limit_us=%.6f\n",
+                ok ? "PASS" : "FAIL", average, p99, deadline * 0.5, deadline);
     return ok;
 }
 
@@ -2654,9 +2655,10 @@ static bool test_voice_param_performance() {
     std::sort(timings.begin(), timings.end());
     const double average = sum / iterations;
     const double p99 = timings[static_cast<size_t>(iterations * 0.99)];
-    const bool ok = std::isfinite(average) && std::isfinite(p99) && p99 < deadline * 0.5;
-    std::printf("%s 59 voice param performance: overrides=16 slots=6 voices=16 unison=4 LP24 average_us=%.6f p99_us=%.6f half_deadline_us=%.6f\n",
-        ok ? "PASS" : "FAIL", average, p99, deadline * 0.5);
+    const bool ok = std::isfinite(average) && std::isfinite(p99) &&
+                    average < deadline * 0.5 && p99 < deadline;
+    std::printf("%s 59 voice param performance: overrides=16 slots=6 voices=16 unison=4 LP24 average_us=%.6f p99_us=%.6f average_limit_us=%.6f p99_limit_us=%.6f\n",
+        ok ? "PASS" : "FAIL", average, p99, deadline * 0.5, deadline);
     return ok;
 }
 
@@ -4120,9 +4122,10 @@ static bool test_insert_fx_performance() {
     std::sort(timings.begin(), timings.end());
     const double average = sum / iterations;
     const double p99 = timings[static_cast<size_t>(iterations * 0.99)];
-    const bool ok = std::isfinite(average) && std::isfinite(p99) && p99 < deadline * 0.5;
-    std::printf("%s 71 insert FX performance: slots=6 voices=16 unison=4 LP24 all_inserts average_us=%.6f p99_us=%.6f half_deadline_us=%.6f\n",
-                ok ? "PASS" : "FAIL", average, p99, deadline * 0.5);
+    const bool ok = std::isfinite(average) && std::isfinite(p99) &&
+                    average < deadline * 0.5 && p99 < deadline;
+    std::printf("%s 71 insert FX performance: slots=6 voices=16 unison=4 LP24 all_inserts average_us=%.6f p99_us=%.6f average_limit_us=%.6f p99_limit_us=%.6f\n",
+                ok ? "PASS" : "FAIL", average, p99, deadline * 0.5, deadline);
     return ok;
 }
 
