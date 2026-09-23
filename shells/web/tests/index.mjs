@@ -16,3 +16,5 @@ import "./sound-analysis.test.mjs";
 import "./match-audio.test.mjs";
 import "./envelope-match.test.mjs";
 import "./filter-match.test.mjs";
+import "./numeric-control.test.mjs";
+import "./studio-transitions.test.mjs";

@@ -32,3 +32,12 @@ test("octave status names the exact PC note range", () => {
   assert.equal(keyboardOctaveLabel(0), "OCTAVE 0 · C4–C5");
   assert.equal(keyboardOctaveLabel(2), "OCTAVE +2 · C6–C7");
 });
+
+test("shortcuts and IME never start notes or change octaves, but keyup keeps its identity", () => {
+  for (const modifier of ["metaKey", "ctrlKey", "altKey", "isComposing"]) {
+    assert.equal(noteForKeyboardEvent({ code:"KeyS", [modifier]:true }), undefined);
+    assert.equal(octaveDeltaForKeyboardEvent({ code:"KeyZ", [modifier]:true }), 0);
+    assert.equal(keyboardInputId({ code:"KeyS", [modifier]:true }), "KeyS");
+  }
+  assert.equal(noteForKeyboardEvent({ code:"KeyS", shiftKey:true }), 62);
+});

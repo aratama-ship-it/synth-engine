@@ -42,7 +42,7 @@ test("studio shell exposes four accessible work areas and real visual editors", 
 });
 
 test("shared EQ exposes frequency, Q, and a DSP-derived response curve", async () => {
-  const source = await readFile(new URL("synth-ui.js", root), "utf8");
+  const source = await readFile(new URL("synth-ui.js", root), "utf8") + await readFile(new URL("fx-controls.js", root), "utf8");
   const css = await readFile(new URL("synth-ui.css", root), "utf8");
   assert.match(source, /id:"lowFrequency",label:"LOW FREQ",min:40,max:600,scale:"log"/);
   assert.match(source, /id:"midFrequency",label:"MID FREQ",min:200,max:8000,scale:"log"/);
@@ -51,7 +51,8 @@ test("shared EQ exposes frequency, Q, and a DSP-derived response curve", async (
   assert.match(source, /eqResponsePath\(module\)/);
   assert.match(source, /FILTER RESPONSE · SETTING/);
   assert.match(css, /\.eq-response-plot \{[^}]*height:var\(--eq-plot-height\)/);
-  assert.match(css, /\.insert-card\[data-effect="eq"\] \.insert-controls \{ grid-template-columns:repeat\(4,minmax\(100px,1fr\)\); \}/);
+  assert.match(css, /\.insert-card\[data-effect="eq"\] \.insert-controls \{ grid-template-columns:repeat\(3,minmax\(0,1fr\)\); \}/);
+  assert.match(source, /document\.createElement\("fieldset"\)/);
 });
 
 test("quality lab stays out of the normal surface and remains available by explicit query", async () => {
@@ -128,10 +129,10 @@ test("local preset bridge loader keeps three allowlisted audition patch IDs", as
   }
   assert.match(source, /if \(!isLocalPreview\) throw new Error\("Preset Bridgeはlocalhost専用です"\)/);
   assert.match(source, /Object\.hasOwn\(bridgeAuditionPresets, id\)/);
-  assert.match(source, /parsePatch\(await fetchChecked\(bridgeAuditionPresets\[id\], "text"\)\)/);
+  assert.match(source, /const text = await fetchChecked\(bridgeAuditionPresets\[id\], "text"\);[\s\S]*?patchLoads\.isCurrent\(ticket\)[\s\S]*?parsePatch\(text\)/);
   assert.match(source, /requestedBridgePreset !== null[\s\S]*loadBridgeAuditionPreset\(requestedBridgePreset\)[\s\S]*else if \(savedAutosave\)/);
   assert.match(source, /cleanUrl\.searchParams\.delete\("bridgePreset"\)[\s\S]*history\.replaceState/);
-  assert.match(html, /synth-ui\.js\?m4ax=1/);
+  assert.match(html, /synth-ui\.js\?polish=20260923/);
   const loader = source.match(/async function loadBridgeAuditionPreset\(id\) \{[\s\S]*?\n\}/)?.[0] ?? "";
   assert.doesNotMatch(loader, /ensureAudio|startNote|openOutputGate/);
 });
@@ -162,7 +163,7 @@ test("reference match stays local and does not claim automatic patch generation"
 });
 
 test("studio dials support vertical drag, fine control, reset, and direct entry", async () => {
-  const source = await readFile(new URL("synth-ui.js", root), "utf8");
+  const source = await readFile(new URL("synth-ui.js", root), "utf8") + await readFile(new URL("numeric-control.js", root), "utf8");
   assert.match(source, /pointermove/);
   assert.match(source, /event\.shiftKey \? \.1 : 1/);
   assert.match(source, /dblclick/);

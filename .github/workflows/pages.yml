@@ -57,6 +57,9 @@ jobs:
             shells/web/envelope-match.js \
             shells/web/filter-match.js \
             shells/web/eq-response.js \
+            shells/web/numeric-control.js \
+            shells/web/fx-controls.js \
+            shells/web/patch-load-state.js \
             shells/web/note-registry.js \
             shells/web/keyboard-input.js \
             shells/web/wavetable-import.js \

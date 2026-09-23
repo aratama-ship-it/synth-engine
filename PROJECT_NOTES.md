@@ -445,5 +445,15 @@ C++ CLIレンダラー（プリセット＋イベントJSON → WAV）を基準�
 
 ## 進め方
 
+### 2026-09-23 UI / UX polish + state safety（公開前検証の記録）
+
+- 本人指定のAstra主担当＋Claude Fable 5.1の読み取り専用レビュー。Claudeへの入力は公開済みa4fce012の隔離コピーに限定。実モデル・成功応答を確認し、提案はソースで独立検証した。
+- STOP / blur / Escape / Quality Labのreset種別をVOICES(0)へ修正。ALL(1)は直後に全パラメータを再送するapplyPatchに限定。INITは元から全設定リセット済みであり、今回新たに音響仕様を変更したものではない。
+- 数値入力とドラッグをnumeric-control.js、FXの純表示定義をfx-controls.js、非同期読込の世代管理をpatch-load-state.jsへ分離。Preset / INIT / Undoの適用を共通化。単位付き入力、EQ帯域整理、BYPASS表示、モーダルのTab循環を追加。
+- 修飾キー誤発音、古い読込応答、失敗したJSONの巻戻し、保存拒否時の起動失敗、初期化によるautosave先行上書き、Worklet障害の通知欠如を修正。keyup識別は修飾キーでも維持する。
+- Core 82/82、Web 93/93。実WASMの無出力試験でpanic後の再発音PCMが完全一致。FX抽出の969ケースも旧版とSHA一致。DSP/プリセット/WASM不変、WASM SHA256=1f02dd2886425038dec4a97c5b76280784a7ce7076b109cd82fcdef0f6c41b37。
+- 実ブラウザは専用localhost:8974で保存領域を隔離し、390/1440px・直接入力・取消・Undo/Redo・保存/再読込・フォーカス・Delay縦ドラッグを無発音確認。実スピーカー・Safari・実機タッチは未確認。
+- 判断用入口：`design/polish-20260923/index.html`。公開前の確認用：`http://127.0.0.1:8963/shells/web/synth.html?polish=20260923&tab=fx`。この検証時点では未コミット・未push・未デプロイ。既存reports/・research/は未変更。
+
 思考・設計・検証は Claude、実装は Codex へ委譲（`_claude-rules/codex-delegation.md`）。
 着手前に `_claude-rules/dev-preferences.md` の方針リストを読む。削除・移動は本人承認フロー。

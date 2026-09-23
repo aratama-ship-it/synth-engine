@@ -44,6 +44,39 @@ async function waitUntilReady(processor, messages) {
   assert.equal(processor.ready, true, "AudioWorklet processor did not initialize within 5 seconds");
 }
 
+test("silent safety gate: panic keeps the exact timbre on the next note", { concurrency:false }, async () => {
+  const wasm = await readFile(new URL("../../../build/synth_engine.wasm", import.meta.url));
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "sampleRate");
+  Object.defineProperty(globalThis, "sampleRate", { configurable:true, value:SAMPLE_RATE });
+  try {
+    const processor = new SynthEngineProcessor({ processorOptions:{ wasmBytes:wasm.buffer.slice(wasm.byteOffset, wasm.byteOffset + wasm.byteLength) } });
+    const messages = []; processor.port.postMessage = (message) => messages.push(message);
+    await waitUntilReady(processor, messages);
+    processor.receive({ type:"preset", params:[[0, 2], [1, .41], [2, .16], [3, .005], [7, .13], [17, 1], [19, .08], [35, 1], [37, 1700], [38, .22], [99, 1], [100, -3], [101, 2]] });
+    for (let block = 0; block < 128; block += 1) renderBlock(processor);
+    const renderNote = () => {
+      processor.receive({ type:"reset", kind:0, seed:1 });
+      processor.receive({ type:"events", events:[{ frame:processor.renderFrame, kind:1, id:1, a:60, b:.5 }] });
+      const pcm = [];
+      for (let block = 0; block < 32; block += 1) {
+        const outputs = [[new Float32Array(128), new Float32Array(128)], [new Float32Array(128), new Float32Array(128)]];
+        processor.process([], outputs); pcm.push(...outputs[0][0], ...outputs[0][1]);
+      }
+      return pcm;
+    };
+    const before = renderNote();
+    assert.ok(Math.max(...before.map(Math.abs)) > ACTIVE_FLOOR);
+    processor.receive({ type:"reset", kind:0, seed:1 });
+    assert.equal(renderBlock(processor).peak, 0, "panic must silence both dry and send outputs");
+    const after = renderNote();
+    assert.deepEqual(after, before, "same notes after STOP must have byte-identical PCM");
+    assert.equal(processor.failed, false);
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "sampleRate", descriptor);
+    else delete globalThis.sampleRate;
+  }
+});
+
 test("silent safety gate: high-FM, mono/legato glide, filter, and EQ changes remain bounded", { concurrency: false }, async (context) => {
   const wasmPath = new URL("../../../build/synth_engine.wasm", import.meta.url);
   const wasmBytes = await readFile(wasmPath).catch((error) => {

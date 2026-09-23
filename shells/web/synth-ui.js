@@ -9,8 +9,11 @@ import { suggestAmpEnvelope } from "./envelope-match.js";
 import { estimateFilterCutoff, planFilterCutoffProbe } from "./filter-match.js?m4ax=1";
 import { createNoteRegistry } from "./note-registry.js";
 import { eqResponsePath } from "./eq-response.js?m4ax=1";
+import { bindNumericInput, bindDialDrag } from "./numeric-control.js";
+import { createPatchLoadState } from "./patch-load-state.js";
+import { insertDefinitions, formatInsertValue, insertSliderPosition, insertSliderValue, insertInputUnit } from "./fx-controls.js";
 import { createSafeWavetableFrame, parseWavetableWav, wavetableFramePosition } from "./wavetable-import.js?m4t=1";
-import { clampKeyboardOctave, keyboardInputId, keyboardOctaveLabel, noteForKeyboardEvent, octaveDeltaForKeyboardEvent } from "./keyboard-input.js?m4s=1";
+import { clampKeyboardOctave, keyboardInputId, keyboardOctaveLabel, noteForKeyboardEvent, octaveDeltaForKeyboardEvent } from "./keyboard-input.js?polish=20260923";
 
 const paths = { wasm: "../../build/synth_engine.wasm?m4ax=1", presets: "../../presets/" };
 const presets = Object.freeze({
@@ -88,6 +91,7 @@ let wasmBytes;
 let context;
 let synth;
 let audioReady;
+let audioFailure;
 let outputGate;
 let audioSuspension;
 let spaceEffects;
@@ -100,6 +104,7 @@ let userPatches = [];
 let patchHistory;
 let captureTimer;
 let applyingPatch = false;
+const patchLoads = createPatchLoadState();
 let activePatchIdentity = { name:"EPiano", category:"Keys" };
 let saveReplacePending = false;
 let saveReturnFocus;
@@ -136,7 +141,7 @@ function formatValue(parameter, value) {
   if ([35, 48, 81].includes(parameter.id)) return value >= .5 ? "ON" : "OFF";
   if (parameter.id === 37) return `${Math.round(value).toLocaleString()} Hz`;
   if ([46, 79].includes(parameter.id)) return `${Number(value.toFixed(value < 1 ? 2 : 1))} Hz`;
-  if ((parameter.flags & 2) !== 0) return `${Number(value.toFixed(2))} s`;
+  if ((parameter.flags & 2) !== 0) return `${Number(value.toFixed(4))} s`;
   if ([10, 14, 21, 25, 50].includes(parameter.id)) return `${Math.round(value)} ct`;
   if ([13, 24].includes(parameter.id)) return `${Math.round(value)} st`;
   if ([117, 118].includes(parameter.id)) return formatSignedPercent(value);
@@ -160,7 +165,12 @@ function updateControl(id) {
   const parameter = parameterInfo.get(id); const value = values.get(id); const stored = controlsById.get(id) ?? [];
   for (const control of stored) {
     control.input.setAttribute("aria-valuetext", formatValue(parameter, value));
-    if (control.kind === "dial") { control.input.value = String(inputForValue(parameter, control.definition, value)); control.output.value = control.output === document.activeElement ? control.output.value : formatValue(parameter, value); control.dial.style.setProperty("--turn", `${-135 + normalized(parameter, value) * 270}deg`); }
+    if (control.kind === "dial") {
+      control.input.value = String(inputForValue(parameter, control.definition, value));
+      if (control.output !== document.activeElement) control.output.value = formatValue(parameter, value);
+      const position = control.definition.scale === "log" ? inputForValue(parameter, control.definition, value) : normalized(parameter, value);
+      control.dial.style.setProperty("--turn", `${-135 + position * 270}deg`);
+    }
     if (control.kind === "select") control.input.value = String(Math.round(value));
     if (control.kind === "toggle") { control.input.checked = value >= 0.5; control.input.nextElementSibling.textContent = value >= .5 ? (control.definition.toggleLabel ?? "ON") : "OFF"; }
     if (control.kind === "matrix-amount") control.input.value = String(value);
@@ -271,7 +281,7 @@ function syncQualityLab() {
 function applyQualityValues(updates, message) {
   stopAllNotes();
   updates.forEach(([id, value]) => setValue(id, value));
-  synth?.reset(1);
+  synth?.reset(0);
   setStatus(`${message}。同じ鍵盤をもう一度弾いて比較してください。`);
 }
 function applyUnisonDensityMode(mode) {
@@ -368,30 +378,25 @@ function installModDialog() {
 }
 
 function installDialInteraction(input, output, parameter, definition) {
-  let drag;
-  input.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
-    drag = { y:event.clientY, value:values.get(parameter.id) };
-    input.setPointerCapture(event.pointerId);
-    event.preventDefault();
+  bindDialDrag(input, {
+    ...parameter, scale:definition.scale, defaultValue:parameter.default,
+    getValue:() => values.get(parameter.id), setValue:(value) => setValue(parameter.id, value),
   });
-  input.addEventListener("pointermove", (event) => {
-    if (!drag || !input.hasPointerCapture(event.pointerId)) return;
-    const range = parameter.max - parameter.min;
-    const precision = event.shiftKey ? .1 : 1;
-    setValue(parameter.id, drag.value + ((drag.y - event.clientY) / 160) * range * precision);
+  bindNumericInput(output, {
+    getValue:() => values.get(parameter.id), setValue:(value) => setValue(parameter.id, value),
+    format:(value) => formatValue(parameter, value), unit:parameterInputUnit(parameter),
+    onInvalid:() => setStatus(`${parameter.displayName}: 数値と表示されている単位を入力してください。値は変更していません。`, true),
   });
-  const finish = (event) => { if (drag && input.hasPointerCapture(event.pointerId)) input.releasePointerCapture(event.pointerId); drag = undefined; };
-  input.addEventListener("pointerup", finish);
-  input.addEventListener("pointercancel", finish);
-  input.addEventListener("dblclick", (event) => { event.preventDefault(); setValue(parameter.id, parameter.default); });
-  output.addEventListener("focus", () => { output.value = Number(values.get(parameter.id).toFixed(6)).toString(); output.select(); });
-  output.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") { event.preventDefault(); output.blur(); }
-    if (event.key === "Escape") { event.preventDefault(); output.value = formatValue(parameter, values.get(parameter.id)); output.blur(); }
-  });
-  output.addEventListener("change", () => { if (!setValue(parameter.id, Number(output.value.replaceAll(",", "").match(/-?\d*\.?\d+/)?.[0]))) output.value = formatValue(parameter, values.get(parameter.id)); });
-  output.addEventListener("blur", () => { output.value = formatValue(parameter, values.get(parameter.id)); });
+}
+
+function parameterInputUnit(parameter) {
+  if ([37, 46, 79].includes(parameter.id)) return "hz";
+  if ((parameter.flags & 2) !== 0) return "seconds";
+  if ([117, 118].includes(parameter.id)) return "percent";
+  if ([10, 14, 21, 25, 50].includes(parameter.id)) return "ct";
+  if ([13, 24].includes(parameter.id)) return "st";
+  if ([12, 23, 31, 40, 49].includes(parameter.id)) return "oct";
+  return "number";
 }
 
 function createControl(definition, advanced = false) {
@@ -405,7 +410,7 @@ function createControl(definition, advanced = false) {
     field.classList.add("control-toggle");
     const toggle = document.createElement("label"); toggle.className = "toggle"; const input = document.createElement("input"); input.type = "checkbox"; input.setAttribute("aria-label", parameter.displayName); const text = document.createElement("span"); text.textContent = definition.toggleLabel ?? definition.label; input.addEventListener("change", () => setValue(parameter.id, input.checked ? 1 : 0)); toggle.append(input, text); field.append(label, toggle, output); registerControl(parameter.id, { kind:"toggle", input, output, definition });
   } else {
-    const dial = document.createElement("div"); dial.className = "dial"; const input = document.createElement("input"); input.type = "range"; input.min = definition.scale === "log" ? "0" : String(parameter.min); input.max = definition.scale === "log" ? "1" : String(parameter.max); input.step = String(rangeStep(parameter)); input.setAttribute("aria-label", `${parameter.displayName}。上下ドラッグ、Shiftで微調整、ダブルクリックで初期値`); input.addEventListener("input", () => setValue(parameter.id, valueForInput(parameter, definition, input.value)));
+    const dial = document.createElement("div"); dial.className = "dial"; const input = document.createElement("input"); input.type = "range"; input.min = definition.scale === "log" ? "0" : String(parameter.min); input.max = definition.scale === "log" ? "1" : String(parameter.max); input.step = definition.scale === "log" ? "0.001" : String(rangeStep(parameter)); input.setAttribute("aria-label", `${parameter.displayName}。上下ドラッグ、Shiftで微調整、ダブルクリックで初期値`); input.addEventListener("input", () => setValue(parameter.id, valueForInput(parameter, definition, input.value)));
     const valueInput = document.createElement("input"); valueInput.type = "text"; valueInput.inputMode = "decimal"; valueInput.className = "control-value-input"; valueInput.setAttribute("aria-label", `${parameter.displayName} 数値入力`);
     dial.append(input); field.append(label, dial, valueInput); const registered = { kind:"dial", input, output:valueInput, dial, definition }; registerControl(parameter.id, registered); installDialInteraction(input, valueInput, parameter, definition);
   }
@@ -1081,7 +1086,10 @@ function updateEffectControl(id) {
   const value = spaceValues[id];
   const input = control.querySelector("input,select");
   if (input.type === "checkbox") { input.checked = Boolean(value); input.nextElementSibling.textContent = value ? "ON" : "BYPASS"; } else input.value = String(value);
-  control.querySelector("output").textContent = formatEffectValue(id, value);
+  const output = control.querySelector("output,.control-value-input");
+  if (output.matches("input")) { if (output !== document.activeElement) output.value = formatEffectValue(id, value); }
+  else output.textContent = formatEffectValue(id, value);
+  if (input.type === "range") input.setAttribute("aria-valuetext", formatEffectValue(id, value));
   const range = effectRanges[id]; const amount = range ? (value - range[0]) / (range[1] - range[0]) : Number(value);
   control.querySelector(".dial")?.style.setProperty("--turn", `${-135 + amount * 270}deg`);
 }
@@ -1105,7 +1113,14 @@ function createEffectControl(id, label, minimum, maximum) {
   const labelElement = document.createElement("span"); labelElement.className = "control-label"; labelElement.textContent = label;
   const dial = document.createElement("div"); dial.className = "dial";
   const input = document.createElement("input"); input.type = "range"; input.min = String(minimum); input.max = String(maximum); input.step = "0.001"; input.setAttribute("aria-label", label); input.addEventListener("input", () => setEffectValue(id, input.value));
-  const output = document.createElement("output"); output.className = "control-value";
+  const output = document.createElement("input"); output.type = "text"; output.inputMode = "decimal"; output.className = "control-value-input";
+  const effectName = id.startsWith("delay") ? "Delay" : "Reverb";
+  output.setAttribute("aria-label", `${effectName} ${label} 数値入力`);
+  input.setAttribute("aria-label", `${effectName} ${label}。上下ドラッグ、Shiftで微調整、ダブルクリックで初期値`);
+  const unit = ["delayTime", "reverbPreDelay"].includes(id) ? "milliseconds" : id === "reverbDecay" ? "seconds" : ["delayTone", "reverbLowCut", "reverbHighCut"].includes(id) ? "hz" : "percent";
+  bindNumericInput(output, { getValue:() => spaceValues[id], setValue:(value) => setEffectValue(id, value), format:(value) => formatEffectValue(id, value), unit,
+    onInvalid:() => setStatus(`${effectName} ${label}: 数値と単位を確認してください。値は変更していません。`, true) });
+  bindDialDrag(input, { min:minimum, max:maximum, defaultValue:SPACE_DEFAULTS[id], getValue:() => spaceValues[id], setValue:(value) => setEffectValue(id, value) });
   dial.append(input); field.append(labelElement, dial, output); updateEffectControl(id); return field;
 }
 function createEffectSelect(id, label, options) {
@@ -1115,52 +1130,24 @@ function createEffectSelect(id, label, options) {
   const output = document.createElement("output"); output.className = "control-value"; field.append(labelElement, input, output); updateEffectControl(id); return field;
 }
 
-const insertDefinitions = Object.freeze({
-  distortion:{ label:"DISTORTION", color:"#F2A26B", controls:[{id:"drive",label:"DRIVE",min:0,max:1},{id:"tone",label:"TONE",min:800,max:18000},{id:"mix",label:"MIX",min:0,max:1}] },
-  chorus:{ label:"CHORUS", color:"#68C7BB", controls:[{id:"rate",label:"RATE",min:.05,max:5},{id:"depth",label:"DEPTH",min:0,max:1},{id:"width",label:"WIDTH",min:0,max:1},{id:"mix",label:"MIX",min:0,max:.65}] },
-  eq:{ label:"3-BAND EQ", color:"#DCE95A", controls:[
-    {id:"lowFrequency",label:"LOW FREQ",min:40,max:600,scale:"log"},
-    {id:"low",label:"LOW GAIN",min:-18,max:18},
-    {id:"midFrequency",label:"MID FREQ",min:200,max:8000,scale:"log"},
-    {id:"midQ",label:"MID Q",min:.25,max:8},
-    {id:"mid",label:"MID GAIN",min:-18,max:18},
-    {id:"highFrequency",label:"HIGH FREQ",min:1500,max:18000,scale:"log"},
-    {id:"high",label:"HIGH GAIN",min:-18,max:18},
-  ] },
-  compressor:{ label:"COMPRESSOR", color:"#F5F0E8", controls:[{id:"threshold",label:"THRESH",min:-60,max:0},{id:"ratio",label:"RATIO",min:1,max:20},{id:"attack",label:"ATTACK",min:.001,max:.2},{id:"release",label:"RELEASE",min:.03,max:1},{id:"makeup",label:"MAKEUP",min:0,max:12}] },
-});
-function formatInsertValue(effect, id, value) {
-  if (["mix", "drive", "depth", "width"].includes(id)) return `${Math.round(value * 100)}%`;
-  if (id === "tone" || id.endsWith("Frequency")) return value >= 1000 ? `${Number((value / 1000).toFixed(2))} kHz` : `${Math.round(value)} Hz`;
-  if (["low", "mid", "high", "threshold", "makeup"].includes(id)) return `${value > 0 ? "+" : ""}${Number(value.toFixed(1))} dB`;
-  if (id === "ratio") return `${Number(value.toFixed(1))}:1`;
-  if (id === "midQ") return `Q ${Number(value.toFixed(2))}`;
-  if (id === "rate") return `${Number(value.toFixed(2))} Hz`;
-  if (id === "attack" || id === "release") return `${Math.round(value * 1000)} ms`;
-  return Number(value.toFixed(3)).toString();
-}
-function insertSliderPosition(control, value) {
-  if (control.scale !== "log") return Number(value);
-  return Math.log(Number(value) / control.min) / Math.log(control.max / control.min);
-}
-function insertSliderValue(control, position) {
-  if (control.scale !== "log") return Number(position);
-  return control.min * (control.max / control.min) ** Number(position);
-}
 function createEqResponse(module) {
   const namespace = "http://www.w3.org/2000/svg";
   const container = document.createElement("figure"); container.className = "eq-response";
   const caption = document.createElement("figcaption"); caption.textContent = "FILTER RESPONSE · SETTING";
-  const svg = document.createElementNS(namespace, "svg"); svg.classList.add("eq-response-plot"); svg.setAttribute("viewBox", "0 0 480 144"); svg.setAttribute("role", "img");
+  const svg = document.createElementNS(namespace, "svg"); svg.classList.add("eq-response-plot"); svg.setAttribute("viewBox", "0 0 480 144"); svg.setAttribute("preserveAspectRatio", "none"); svg.setAttribute("role", "img");
   const grid = document.createElementNS(namespace, "g"); grid.classList.add("eq-response-grid");
   const xForFrequency = (frequency) => 12 + Math.log10(frequency / 20) / 3 * 456;
   for (const frequency of [100, 1000, 10000]) { const line = document.createElementNS(namespace, "line"); const x = xForFrequency(frequency); line.setAttribute("x1", x); line.setAttribute("x2", x); line.setAttribute("y1", "12"); line.setAttribute("y2", "132"); grid.append(line); }
   for (const y of [12, 72, 132]) { const line = document.createElementNS(namespace, "line"); line.setAttribute("x1", "12"); line.setAttribute("x2", "468"); line.setAttribute("y1", y); line.setAttribute("y2", y); if (y === 72) line.classList.add("eq-response-zero"); grid.append(line); }
   const path = document.createElementNS(namespace, "path"); path.classList.add("eq-response-line");
   svg.append(grid, path);
-  const scale = document.createElement("div"); scale.className = "eq-response-scale"; scale.setAttribute("aria-hidden", "true"); scale.innerHTML = "<span>100 Hz</span><span>1 kHz</span><span>10 kHz</span>";
+  const scale = document.createElement("div"); scale.className = "eq-response-scale"; scale.setAttribute("aria-hidden", "true");
+  for (const [frequency, label] of [[100, "100 Hz"], [1000, "1 kHz"], [10000, "10 kHz"]]) {
+    const tick = document.createElement("span"); tick.textContent = label; tick.style.left = `${xForFrequency(frequency) / 480 * 100}%`; scale.append(tick);
+  }
   const summary = document.createElement("p"); summary.className = "eq-response-summary";
   const update = () => {
+    caption.textContent = module.on ? "FILTER RESPONSE · SETTING" : "FILTER RESPONSE · SETTING · BYPASS";
     path.setAttribute("d", eqResponsePath(module));
     const low = `${formatInsertValue("eq", "lowFrequency", module.lowFrequency)} ${formatInsertValue("eq", "low", module.low)}`;
     const mid = `${formatInsertValue("eq", "midFrequency", module.midFrequency)} ${formatInsertValue("eq", "midQ", module.midQ)} ${formatInsertValue("eq", "mid", module.mid)}`;
@@ -1190,12 +1177,40 @@ function moveInsert(id, direction) {
   (target && !target.disabled ? target : card?.querySelector(".insert-toggle"))?.focus();
   schedulePatchCapture();
 }
+function createInsertControl(id, control, response) {
+  const module = fxValues.modules[id]; const definition = insertDefinitions[id];
+  const field = document.createElement("div"); field.className = "insert-control"; field.dataset.control = control.id;
+  const caption = document.createElement("span"); caption.textContent = control.label;
+  const input = document.createElement("input"); input.type = "range";
+  input.min = control.scale === "log" ? "0" : String(control.min);
+  input.max = control.scale === "log" ? "1" : String(control.max);
+  input.step = control.scale === "log" ? ".002" : String(Math.max((control.max - control.min) / 500, .001));
+  input.setAttribute("aria-label", `${definition.label} ${control.label}`);
+  const output = document.createElement("input"); output.type = "text"; output.inputMode = "decimal"; output.className = "control-value-input";
+  output.setAttribute("aria-label", `${definition.label} ${control.label} 数値入力`);
+  const refresh = () => {
+    input.value = String(insertSliderPosition(control, module[control.id]));
+    input.setAttribute("aria-valuetext", formatInsertValue(id, control.id, module[control.id]));
+    if (output !== document.activeElement) output.value = formatInsertValue(id, control.id, module[control.id]);
+    response?.update();
+  };
+  const set = (value) => {
+    applyInsertPatch(id, { [control.id]:Math.min(control.max, Math.max(control.min, value)) }); refresh();
+  };
+  bindNumericInput(output, {
+    getValue:() => module[control.id], setValue:set, format:(value) => formatInsertValue(id, control.id, value), unit:insertInputUnit(control.id),
+    onInvalid:() => setStatus(`${definition.label} ${control.label}: 数値と単位を確認してください。値は変更していません。`, true),
+  });
+  input.addEventListener("input", () => set(insertSliderValue(control, input.value)));
+  input.addEventListener("dblclick", () => set(FX_DEFAULTS.modules[id][control.id]));
+  field.append(caption, output, input); refresh(); return field;
+}
 function renderInsertRack() {
   elements["insert-rack"].replaceChildren();
   fxValues.order.forEach((id, index) => {
     const definition = insertDefinitions[id]; const module = fxValues.modules[id]; const card = document.createElement("section"); card.className = "insert-card"; card.style.setProperty("--insert-color", definition.color); card.dataset.effect = id;
     const header = document.createElement("div"); header.className = "insert-heading"; const title = document.createElement("h3"); title.textContent = `${String(index + 1).padStart(2, "0")} ${definition.label}`;
-    const actions = document.createElement("div"); const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "insert-toggle"; toggle.setAttribute("aria-pressed", String(module.on)); toggle.textContent = module.on ? "ON" : "BYPASS"; toggle.addEventListener("click", () => { module.on = !module.on; applyInsertPatch(id, { on:module.on }); toggle.textContent = module.on ? "ON" : "BYPASS"; toggle.setAttribute("aria-pressed", String(module.on)); card.classList.toggle("is-on", module.on); });
+    const actions = document.createElement("div"); const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "insert-toggle"; toggle.setAttribute("aria-pressed", String(module.on)); toggle.textContent = module.on ? "ON" : "BYPASS"; toggle.addEventListener("click", () => { module.on = !module.on; applyInsertPatch(id, { on:module.on }); toggle.textContent = module.on ? "ON" : "BYPASS"; toggle.setAttribute("aria-pressed", String(module.on)); card.classList.toggle("is-on", module.on); response?.update(); });
     toggle.setAttribute("aria-label", `${definition.label} 有効`);
     const up = document.createElement("button"); up.type = "button"; up.className = "insert-move"; up.dataset.direction = "-1"; up.textContent = "↑"; up.disabled = index === 0; up.setAttribute("aria-label", `${definition.label}を前へ`); up.addEventListener("click", () => moveInsert(id, -1));
     const down = document.createElement("button"); down.type = "button"; down.className = "insert-move"; down.dataset.direction = "1"; down.textContent = "↓"; down.disabled = index === fxValues.order.length - 1; down.setAttribute("aria-label", `${definition.label}を後へ`); down.addEventListener("click", () => moveInsert(id, 1)); actions.append(toggle, up, down); header.append(title, actions);
@@ -1203,7 +1218,17 @@ function renderInsertRack() {
     const response = id === "eq" ? createEqResponse(module) : undefined;
     if (response) body.append(response.element);
     const controls = document.createElement("div"); controls.className = "insert-controls";
-    definition.controls.forEach((control) => { const field = document.createElement("label"); field.className = "insert-control"; const caption = document.createElement("span"); caption.textContent = control.label; const input = document.createElement("input"); input.type = "range"; input.min = control.scale === "log" ? "0" : String(control.min); input.max = control.scale === "log" ? "1" : String(control.max); input.step = control.scale === "log" ? ".002" : String(Math.max((control.max - control.min) / 500, .001)); input.value = String(insertSliderPosition(control, module[control.id])); input.setAttribute("aria-label", `${definition.label} ${control.label}`); const output = document.createElement("output"); output.textContent = formatInsertValue(id, control.id, module[control.id]); input.addEventListener("input", () => { const value = insertSliderValue(control, input.value); module[control.id] = value; output.textContent = formatInsertValue(id, control.id, value); applyInsertPatch(id, { [control.id]:value }); response?.update(); }); input.addEventListener("dblclick", () => { const value = FX_DEFAULTS.modules[id][control.id]; input.value = String(insertSliderPosition(control, value)); module[control.id] = value; output.textContent = formatInsertValue(id, control.id, value); applyInsertPatch(id, { [control.id]:value }); response?.update(); }); field.append(caption, input, output); controls.append(field); });
+    if (id === "eq") {
+      controls.classList.add("eq-bands");
+      for (const band of ["low", "mid", "high"]) {
+        const group = document.createElement("fieldset"); group.className = "eq-band";
+        const legend = document.createElement("legend"); legend.textContent = band.toUpperCase();
+        group.append(legend);
+        const ids = [`${band}Frequency`, band, ...(band === "mid" ? ["midQ"] : [])];
+        ids.forEach((controlId) => group.append(createInsertControl(id, definition.controls.find((control) => control.id === controlId), response)));
+        controls.append(group);
+      }
+    } else definition.controls.forEach((control) => controls.append(createInsertControl(id, control, response)));
     body.append(controls); card.append(header, body); card.classList.toggle("is-on", module.on); elements["insert-rack"].append(card);
   });
 }
@@ -1248,15 +1273,30 @@ function capturePatch(name = currentPatchName(), category = currentPatchCategory
   return createPatchSnapshot({ name, category, core:[...values.entries()].filter(([id]) => !insertFxParamIds.has(id)), space:{ ...spaceValues }, fx:structuredClone(fxValues) });
 }
 function updateHistoryButtons() { const state = patchHistory?.state() ?? { canUndo:false, canRedo:false }; elements.undo.disabled = !state.canUndo; elements.redo.disabled = !state.canRedo; }
-function saveAutosave(patch = capturePatch()) { try { localStorage.setItem(storageKeys.autosave, serializePatch(patch)); } catch (error) { setStatus(`自動保存できません: ${error.message}`, true); } }
+function reportStorageError(error) {
+  const warning = document.getElementById("storage-warning");
+  warning.hidden = false;
+  warning.textContent = `ブラウザ保存を利用できません。演奏・編集は可能です。終了前にEXPORT JSONで保存してください。${error.message}`;
+}
+function readAutosave() {
+  try { return localStorage.getItem(storageKeys.autosave); }
+  catch (error) { reportStorageError(error); return null; }
+}
+function saveAutosave(patch = capturePatch()) {
+  try { localStorage.setItem(storageKeys.autosave, serializePatch(patch)); }
+  catch (error) { reportStorageError(error); }
+}
 function schedulePatchCapture() {
-  if (applyingPatch || !patchHistory) return;
+  if (applyingPatch) return;
+  patchLoads.invalidate();
+  if (!patchHistory) return;
   clearTimeout(captureTimer);
   captureTimer = setTimeout(() => { captureTimer = undefined; const patch = capturePatch(); patchHistory.push(patch); saveAutosave(patch); updateHistoryButtons(); }, 180);
 }
-function applyPatch(candidate, { resetHistory = false, message } = {}) {
-  const patch = validatePatch(candidate); applyingPatch = true; clearTimeout(captureTimer); captureTimer = undefined; stopAllNotes();
+function applyPatch(candidate, { resetHistory = false, message, persist = true } = {}) {
+  const patch = validatePatch(candidate); patchLoads.invalidate(); applyingPatch = true; clearTimeout(captureTimer); captureTimer = undefined;
   try {
+    stopAllNotes();
     activePatchIdentity = { name:patch.name, category:patch.category };
     syncPresetIdentity(patch.name, patch.category);
     restoreDefaults();
@@ -1275,7 +1315,8 @@ function applyPatch(candidate, { resetHistory = false, message } = {}) {
     if (synth) { synth.reset(1); [...values.entries()].forEach(([id, value]) => synth.setParam(id, value)); }
     markMatchCoreChanged();
     if (resetHistory) patchHistory?.reset(capturePatch(patch.name, patch.category));
-    saveAutosave(capturePatch(patch.name, patch.category)); updateHistoryButtons();
+    if (persist) saveAutosave(capturePatch(patch.name, patch.category));
+    updateHistoryButtons();
     const restored = message ?? `${patch.name}を復元しました。音源・変調・FX・順序を適用済みです。`;
     setStatus(customFallback ? `${restored} CUSTOM WTの音声は保存されないためBasic Shapesへ戻しました。` : restored);
   } finally { applyingPatch = false; }
@@ -1285,6 +1326,7 @@ function closeSavePanel() {
   elements["patch-save-overlay"].hidden = true; saveReplacePending = false; elements["patch-save-warning"].textContent = ""; elements["patch-save-confirm"].textContent = "SAVE"; saveReturnFocus?.focus(); saveReturnFocus = undefined;
 }
 function openSavePanel() {
+  stopAllNotes();
   saveReturnFocus = document.activeElement; saveReplacePending = false; elements["patch-name"].value = currentPatchName(); elements["patch-save-category"].value = currentPatchCategory();
   if (![...elements["patch-save-category"].options].some((option) => option.value === currentPatchCategory())) elements["patch-save-category"].value = "Custom";
   elements["patch-save-warning"].textContent = `このブラウザへ最大${MAX_USER_PATCHES}件保存できます。`; elements["patch-save-confirm"].textContent = "SAVE"; elements["patch-save-overlay"].hidden = false; elements["patch-name"].focus(); elements["patch-name"].select();
@@ -1297,23 +1339,38 @@ function saveNamedPatch() {
   if (!existing && userPatches.length >= MAX_USER_PATCHES) { elements["patch-save-warning"].textContent = `最大${MAX_USER_PATCHES}件です。既存名を指定して置き換えるか、先にJSONへ書き出してください。`; return; }
   const patch = capturePatch(trimmed, elements["patch-save-category"].value); const id = existing?.id ?? `custom-${Date.now()}`;
   const nextPatches = existing ? userPatches.map((item) => item === existing ? { id, patch } : item) : [...userPatches, { id, patch }];
-  try { storeUserPatches(nextPatches); userPatches = nextPatches; activePatchIdentity = { name:patch.name, category:patch.category }; renderPresets(id); patchHistory.reset(patch); updateHistoryButtons(); closeSavePanel(); setStatus(`${trimmed}を名前付き保存しました（${userPatches.length}/${MAX_USER_PATCHES}）。`); }
+  try { storeUserPatches(nextPatches); userPatches = nextPatches; activePatchIdentity = { name:patch.name, category:patch.category }; patchLoads.invalidate(); clearTimeout(captureTimer); captureTimer = undefined; renderPresets(id); patchHistory.reset(patch); saveAutosave(patch); updateHistoryButtons(); closeSavePanel(); setStatus(`${trimmed}を名前付き保存しました（${userPatches.length}/${MAX_USER_PATCHES}）。`); }
   catch (error) { elements["patch-save-warning"].textContent = `保存できません: ${error.message}`; setStatus(`名前付き保存できません: ${error.message}`, true); }
 }
 function exportCurrentPatch() {
   const patch = capturePatch(); const blob = new Blob([serializePatch(patch)], { type:"application/json" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `${patch.name.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-|-$/g, "") || "synth-patch"}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0); setStatus(`${patch.name}をJSON書き出ししました。`);
 }
 async function importPatchFile(file) {
-  if (!file) return; const before = capturePatch();
-  try { const patch = parsePatch(await file.text()); applyPatch(patch, { resetHistory:true, message:`${patch.name}をJSONから読み込みました。名前付き保存はまだ行っていません。` }); }
-  catch (error) { applyPatch(before, { message:`JSONを読み込めません: ${error.message}。元のパッチを保持しました。` }); setStatus(`JSONを読み込めません: ${error.message}。元のパッチを保持しました。`, true); }
-  finally { elements["patch-file"].value = ""; }
+  if (!file) return;
+  const ticket = patchLoads.begin();
+  // Capture the File, then clear the picker before awaiting so a later selection is independent.
+  elements["patch-file"].value = "";
+  let patch;
+  try {
+    const text = await file.text();
+    if (!patchLoads.isCurrent(ticket)) return;
+    patch = parsePatch(text);
+  } catch (error) {
+    // A failed read must never roll back edits made while the file was being read.
+    if (patchLoads.isCurrent(ticket)) setStatus(`JSONを読み込めません: ${error.message}。現在のパッチを保持しました。`, true);
+    return;
+  }
+  try { applyPatch(patch, { resetHistory:true, message:`${patch.name}をJSONから読み込みました。名前付き保存はまだ行っていません。` }); }
+  catch (error) { panicAudio(); setStatus(`JSONの適用に失敗しました: ${error.message}。出力を停止しました。`, true); }
 }
 
 async function loadBridgeAuditionPreset(id) {
   if (!isLocalPreview) throw new Error("Preset Bridgeはlocalhost専用です");
   if (!Object.hasOwn(bridgeAuditionPresets, id)) throw new RangeError("未知のPreset Bridge候補です");
-  const patch = parsePatch(await fetchChecked(bridgeAuditionPresets[id], "text"));
+  const ticket = patchLoads.begin();
+  const text = await fetchChecked(bridgeAuditionPresets[id], "text");
+  if (!patchLoads.isCurrent(ticket)) return;
+  const patch = parsePatch(text);
   applyPatch(patch, {
     resetHistory:true,
     message:`${patch.name}をPreset Bridgeから読み込みました。出力はミュート中です。鍵盤またはPCキーを押すと開始します。`,
@@ -1326,11 +1383,29 @@ async function loadBridgeAuditionPreset(id) {
 
 async function fetchChecked(url, type = "arrayBuffer") { const response = await fetch(url); if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`); return response[type](); }
 function restoreDefaults() { for (const parameter of parameterInfo.values()) values.set(parameter.id, parameter.default); [...values.keys()].forEach(updateControl); }
-async function loadPreset(id) {
-  const custom = userPatches.find((item) => item.id === id); if (custom) { applyPatch(custom.patch, { resetHistory:true }); return; }
-  const preset = presets[id]; if (!preset) throw new Error(`unknown preset: ${id}`); const text = await fetchChecked(`${paths.presets}${preset.file}`, "text"); const updates = parsePreset(text); applyingPatch = true; activePatchIdentity = { name:preset.label, category:presetCategories[id] }; stopAllNotes(); restoreDefaults(); updates.forEach(([paramId, value]) => { if (parameterInfo.has(paramId)) values.set(paramId, value); }); [...values.keys()].forEach(updateControl); Object.assign(spaceValues, SPACE_DEFAULTS, preset.space); const applied = spaceEffects?.setValues(spaceValues); if (applied) Object.assign(spaceValues, applied); Object.keys(spaceValues).forEach(updateEffectControl); fxValues.order = [...FX_DEFAULTS.order]; FX_IDS.forEach((effectId) => Object.assign(fxValues.modules[effectId], FX_DEFAULTS.modules[effectId])); syncInsertFxCore(); renderInsertRack(); if (synth) { synth.reset(1); synth.loadPreset(text); syncInsertFxCore(); } applyingPatch = false; markMatchCoreChanged(); const patch = capturePatch(preset.label, presetCategories[id]); patchHistory?.reset(patch); saveAutosave(patch); updateHistoryButtons(); setStatus(`${preset.label} — ${preset.description}`);
+async function loadPreset(id, { persist = true } = {}) {
+  const ticket = patchLoads.begin();
+  syncPresetIdentity(currentPatchName(), currentPatchCategory());
+  const custom = userPatches.find((item) => item.id === id);
+  if (custom) { applyPatch(custom.patch, { resetHistory:true, persist }); return; }
+  let patch;
+  const preset = presets[id];
+  try {
+    if (!preset) throw new Error(`unknown preset: ${id}`);
+    const text = await fetchChecked(`${paths.presets}${preset.file}`, "text");
+    if (!patchLoads.isCurrent(ticket)) return;
+    patch = createPatchSnapshot({
+      name:preset.label, category:presetCategories[id], core:parsePreset(text),
+      space:{ ...SPACE_DEFAULTS, ...preset.space }, fx:FX_DEFAULTS,
+    });
+  } catch (error) { if (patchLoads.isCurrent(ticket)) throw error; return; }
+  applyPatch(patch, { resetHistory:true, message:`${preset.label} — ${preset.description}`, persist });
 }
-function initPatch() { applyingPatch = true; activePatchIdentity = { name:"INIT", category:"Custom" }; stopAllNotes(); restoreDefaults(); Object.assign(spaceValues, SPACE_DEFAULTS); const applied = spaceEffects?.setValues(spaceValues); if (applied) Object.assign(spaceValues, applied); Object.keys(spaceValues).forEach(updateEffectControl); fxValues.order = [...FX_DEFAULTS.order]; FX_IDS.forEach((id) => Object.assign(fxValues.modules[id], FX_DEFAULTS.modules[id])); syncInsertFxCore(); renderInsertRack(); synth?.reset(1); syncInsertFxCore(); applyingPatch = false; markMatchCoreChanged(); const patch = capturePatch("INIT", "Custom"); patchHistory?.reset(patch); saveAutosave(patch); updateHistoryButtons(); setStatus("INITへ戻しました。DelayとInsertはBYPASS、ReverbはONです。"); }
+function initPatch() {
+  applyPatch(createPatchSnapshot({ name:"INIT", category:"Custom", core:[], space:SPACE_DEFAULTS, fx:FX_DEFAULTS }), {
+    resetHistory:true, message:"INITへ戻しました。DelayとInsertはBYPASS、ReverbはONです。",
+  });
+}
 function prepareAudio() {
   if (audioReady) return audioReady;
   const preparedContext = new AudioContext();
@@ -1342,6 +1417,16 @@ function prepareAudio() {
   audioReady = (async () => {
     try {
       const node = await createSynthNode(preparedContext, wasmBytes.slice(0));
+      const fail = (message) => {
+        if (context !== preparedContext) return;
+        audioFailure = new Error(`音声エンジンを安全のため停止しました。ページを再読み込みしてください。${message}`);
+        panicAudio();
+        const warning = document.getElementById("audio-error");
+        warning.hidden = false; warning.textContent = audioFailure.message;
+        setStatus(audioFailure.message, true);
+      };
+      node.onMessage((message) => { if (message?.type === "error") fail(message.message || "AudioWorklet error"); });
+      node.audioNode.addEventListener("processorerror", () => fail("AudioWorklet processor error"));
       node.connect(preparedOutputGate);
       spaceEffects = createSpaceEffects(preparedContext, node, preparedOutputGate);
       spaceEffects.setValues(spaceValues);
@@ -1384,6 +1469,7 @@ function suspendAudioContext() {
   catch { /* The closed output gate remains the authoritative fallback. */ }
 }
 async function ensureAudio(shouldOpen = () => true) {
+  if (audioFailure) throw audioFailure;
   const ready = prepareAudio();
   const pendingSuspension = audioSuspension;
   if (pendingSuspension) await pendingSuspension;
@@ -1391,6 +1477,7 @@ async function ensureAudio(shouldOpen = () => true) {
   const resumed = context.resume();
   const node = await ready;
   await resumed;
+  if (audioFailure) throw audioFailure;
   if (shouldOpen()) {
     openOutputGate();
     if (wasSuspended) setStatus("音源を開始しました。鍵盤またはPCキーで演奏できます。");
@@ -1414,7 +1501,7 @@ function stopNote(token) {
   const active = noteRegistry.release(token);
   if (!active) return;
   try { active.node.noteOff(active.handle); }
-  catch (error) { setStatus(`ノート停止を再試行しました: ${error.message}`, true); active.node.reset?.(1); }
+  catch (error) { setStatus(`ノート停止を再試行しました: ${error.message}`, true); active.node.reset?.(0); }
 }
 function stopAllNotes() {
   const active = noteRegistry.drain();
@@ -1428,7 +1515,7 @@ function stopAllNotes() {
 }
 function panicAudio({ broadcast = false } = {}) {
   stopAllNotes();
-  try { synth?.reset(1); }
+  try { synth?.reset(0); }
   finally { closeOutputGate(); suspendAudioContext(); }
   if (broadcast) audioSessionChannel?.postMessage({ type:"panic", owner:audioSessionId });
 }
@@ -1580,6 +1667,11 @@ function bindKey(element, note) {
 function installKeyboard() {
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") { event.preventDefault(); panicAudio({ broadcast:true }); if (elements["mod-dialog"].open) elements["mod-dialog"].close(); return; }
+    // Keep keyup identity unfiltered; modifiers pressed after a note must still release it.
+    if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) {
+      if (activeKeyboardTokens.size) panicAudio();
+      return;
+    }
     if (event.repeat || elements["mod-dialog"].open || !elements["patch-save-overlay"].hidden || event.target.matches('input:not([type="range"]),select,textarea')) return;
     const octaveDelta = octaveDeltaForKeyboardEvent(event);
     if (octaveDelta) { event.preventDefault(); shiftKeyboardOctave(octaveDelta); return; }
@@ -1603,7 +1695,7 @@ function installKeyboard() {
   window.addEventListener("pointercancel", (event) => finishPointerNote(event.pointerId), true);
   window.addEventListener("mouseup", () => { for (const pointerId of [...pointerNoteTokens.keys()]) finishPointerNote(pointerId); }, true);
   window.addEventListener("blur", panicAudio);
-  window.addEventListener("pagehide", panicAudio);
+  window.addEventListener("pagehide", () => { capturePendingEdit(); panicAudio(); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) panicAudio(); });
 }
 
@@ -1621,17 +1713,25 @@ elements["patch-save-panel"].addEventListener("submit", (event) => { event.preve
 elements["patch-save-cancel"].addEventListener("click", closeSavePanel);
 elements["patch-name"].addEventListener("input", () => { saveReplacePending = false; elements["patch-save-confirm"].textContent = "SAVE"; elements["patch-save-warning"].textContent = `このブラウザへ最大${MAX_USER_PATCHES}件保存できます。`; });
 elements["patch-save-overlay"].addEventListener("click", (event) => { if (event.target === elements["patch-save-overlay"]) closeSavePanel(); });
-elements["patch-save-overlay"].addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); closeSavePanel(); } });
+elements["patch-save-overlay"].addEventListener("keydown", (event) => {
+  if (event.key === "Escape") { event.preventDefault(); closeSavePanel(); }
+  if (event.key === "Tab") {
+    const fields = [...elements["patch-save-panel"].querySelectorAll("input,select,button")].filter((field) => !field.disabled);
+    const first = fields[0]; const last = fields.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
+});
 elements.undo.addEventListener("click", () => { capturePendingEdit(); const patch = patchHistory?.undo(); if (patch) applyPatch(patch, { message:`UNDO — ${patch.name}` }); updateHistoryButtons(); });
 elements.redo.addEventListener("click", () => { capturePendingEdit(); const patch = patchHistory?.redo(); if (patch) applyPatch(patch, { message:`REDO — ${patch.name}` }); updateHistoryButtons(); });
 elements["export-patch"].addEventListener("click", exportCurrentPatch); elements["import-patch"].addEventListener("click", () => elements["patch-file"].click()); elements["patch-file"].addEventListener("change", () => importPatchFile(elements["patch-file"].files?.[0]));
 
 try {
   wasmBytes = await fetchChecked(paths.wasm); const parameters = await getParams(wasmBytes); parameters.forEach((parameter) => { parameterInfo.set(parameter.id, parameter); values.set(parameter.id, parameter.default); });
-  const savedAutosave = localStorage.getItem(storageKeys.autosave); loadUserPatches(); renderPresets(); renderControls(); renderPiano(); installTabs(); installEditorBanks(); installModDialog(); installQualityLab(); installOscWarpSurface(); installWavetableImport(); installSoundMatch();
+  const savedAutosave = readAutosave(); loadUserPatches(); renderPresets(); renderControls(); renderPiano(); installTabs(); installEditorBanks(); installModDialog(); installQualityLab(); installOscWarpSurface(); installWavetableImport(); installSoundMatch();
   const requestedTab = urlParams.get("tab");
   if (tabOrder.includes(requestedTab)) selectTab(requestedTab);
-  installAudioSession(); installKeyboard(); await loadPreset(elements.preset.value); patchHistory = createPatchHistory(capturePatch());
+  installAudioSession(); installKeyboard(); await loadPreset(elements.preset.value, { persist:false }); patchHistory = createPatchHistory(capturePatch());
   const requestedBridgePreset = urlParams.get("bridgePreset");
   let startupStatusSet = false;
   if (requestedBridgePreset !== null) {
@@ -1643,5 +1743,6 @@ try {
     catch (error) { setStatus(`自動保存は復元せず、EPianoを保持しました: ${error.message}`, true); }
     startupStatusSet = true;
   }
+  if (!savedAutosave && requestedBridgePreset === null) saveAutosave();
   await prepareAudio(); updateHistoryButtons(); if (!elements.status.classList.contains("error") && !startupStatusSet) setStatus("準備完了。鍵盤またはPCキーを押すと音源を開始します。");
 } catch (error) { setStatus(error.message, true); }

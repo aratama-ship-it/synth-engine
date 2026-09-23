@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="SynthEngineのウェーブテーブル・シンセサイザーをブラウザで演奏し編集する画面">
   <title>SynthEngine — Web Synth</title>
-  <link rel="stylesheet" href="./synth-ui.css?m4ax=1">
+  <link rel="stylesheet" href="./synth-ui.css?polish=20260923">
 </head>
 <body>
   <header class="topbar">
@@ -58,6 +58,8 @@
 
   <main>
     <p id="status" class="status" role="status" aria-live="polite">WASMを読み込んでいます…</p>
+    <p id="storage-warning" class="storage-warning" role="status" hidden></p>
+    <p id="audio-error" class="storage-warning" role="alert" hidden></p>
 
     <nav class="work-tabs" role="tablist" aria-label="音作り画面">
       <button id="tab-osc" class="work-tab is-selected" role="tab" aria-selected="true" aria-controls="panel-osc" tabindex="0" type="button">OSC</button>
@@ -179,6 +181,7 @@
 
     <section id="panel-fx" class="work-panel" role="tabpanel" aria-labelledby="tab-fx" hidden>
       <div class="fx-route" aria-label="エフェクト経路"><span>OSC / FILTER / AMP</span><b>→</b><span>MASTER</span><b>→</b><span>INSERT RACK</span><b>→</b><span>DRY + DELAY + REVERB</span></div>
+      <p class="fx-input-hint">数値をクリックして直接入力 · Hz / kHz / ms / % 対応 · Enterで確定 / Escで取消 · スライダーのダブルクリックで初期値</p>
       <div id="insert-rack" class="insert-rack" aria-label="インサートエフェクト"></div>
       <div class="time-effects">
         <section class="module module-delay" aria-labelledby="delay-title"><div class="module-heading"><p>DLY</p><h2 id="delay-title">DELAY</h2></div><div id="delay" class="control-grid"></div></section>
@@ -335,6 +338,6 @@
       <div class="piano-scroll"><div id="piano" class="piano" aria-label="C4からC6までの鍵盤"></div></div>
     </section>
   </main>
-  <script type="module" src="./synth-ui.js?m4ax=1"></script>
+  <script type="module" src="./synth-ui.js?polish=20260923"></script>
 </body>
 </html>

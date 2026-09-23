@@ -21,11 +21,13 @@ export function keyboardInputId(event) {
 }
 
 export function noteForKeyboardEvent(event, octave = 0) {
+  if (event?.metaKey || event?.ctrlKey || event?.altKey || event?.isComposing) return undefined;
   const base = notesByCode[event?.code] ?? notesByKey[lowerKey(event)];
   return base === undefined ? undefined : base + clampKeyboardOctave(octave) * 12;
 }
 
 export function octaveDeltaForKeyboardEvent(event) {
+  if (event?.metaKey || event?.ctrlKey || event?.altKey || event?.isComposing) return 0;
   if (event?.code === "KeyZ") return -1;
   if (event?.code === "KeyX") return 1;
   const key = lowerKey(event);
