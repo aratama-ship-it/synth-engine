@@ -44,3 +44,10 @@ export function keyboardOctaveLabel(octave) {
   const sign = value > 0 ? `+${value}` : String(value);
   return `OCTAVE ${sign} · C${4 + value}–C${5 + value}`;
 }
+
+export function adjacentPresetId(ids, currentId, direction) {
+  if (!Array.isArray(ids) || !ids.length || (direction !== 1 && direction !== -1)) return undefined;
+  const index = ids.indexOf(currentId);
+  if (index < 0) return direction === 1 ? ids[0] : ids.at(-1);
+  return ids[(index + direction + ids.length) % ids.length];
+}

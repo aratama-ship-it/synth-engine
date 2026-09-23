@@ -52,6 +52,8 @@ jobs:
             shells/web/mod-matrix.js \
             shells/web/fx-rack.js \
             shells/web/patch-state.js \
+            shells/web/patch-bank.js \
+            shells/web/preset-collection.js \
             shells/web/sound-analysis.js \
             shells/web/match-audio.js \
             shells/web/envelope-match.js \
@@ -68,6 +70,8 @@ jobs:
           cp build/synth_engine.wasm _site/build/
           test -s _site/build/synth_engine.wasm
           test -s _site/shells/web/eq-response.js
+          test -s _site/shells/web/patch-bank.js
+          test -s _site/shells/web/preset-collection.js
           test "$(find _site -type l | wc -l)" -eq 0
           sha256sum _site/build/synth_engine.wasm
 

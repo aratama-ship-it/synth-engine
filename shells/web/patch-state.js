@@ -2,7 +2,7 @@ import { FX_DEFAULTS, sanitizeFxPatch } from "./fx-rack.js?m4ax=1";
 import { REVERB_MATERIALS, SPACE_DEFAULTS } from "./space-effects.js";
 
 export const PATCH_SCHEMA_VERSION = 1;
-export const MAX_USER_PATCHES = 8;
+export const MAX_USER_PATCHES = 64;
 
 const CATEGORIES = new Set(["Pad", "Bass", "Pluck", "Bell", "Lead", "Keys", "FX", "Custom"]);
 

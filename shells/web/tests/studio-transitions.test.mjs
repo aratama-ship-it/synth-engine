@@ -4,6 +4,7 @@ import vm from "node:vm";
 import { readFile } from "node:fs/promises";
 import { importSource } from "./load-module.mjs";
 const { createPatchLoadState } = await importSource("../patch-load-state.js");
+const { adjacentPresetId } = await importSource("../keyboard-input.js");
 const source = await readFile(new URL("../synth-ui.js", import.meta.url), "utf8");
 function extract(name) {
   const text = source.match(new RegExp(`^(?:async )?function ${name}\\([^]*?^}`, "m"))?.[0];
@@ -18,9 +19,9 @@ function loaderContext() {
     presets:{ a:{ label:"A", file:"a" }, b:{ label:"B", file:"b" } }, presetCategories:{ a:"Keys", b:"Lead" },
     paths:{ presets:"" }, SPACE_DEFAULTS:{}, FX_DEFAULTS:{},
     fetchChecked:(id) => { const task = deferred(); requests.set(id, task); return task.promise; },
-    parsePreset:() => [], createPatchSnapshot:(patch) => patch,
+    parsePreset:() => [], mergePresetParameters:(base) => base, createPatchSnapshot:(patch) => patch,
     applyPatch:(patch) => { context.patchLoads.invalidate(); applied.push(patch); },
-    elements:{ "patch-file":{ value:"" } }, parsePatch:JSON.parse,
+    elements:{ "patch-file":{ value:"" }, preset:{ value:"current" } }, presetCycleCursor:null, parsePatch:JSON.parse,
     setStatus:(message) => messages.push(message),
   });
   vm.runInContext(["loadPreset", "importPatchFile", "initPatch"].map(extract).join("\n"), context);
@@ -30,9 +31,46 @@ function loaderContext() {
 test("latest preset wins even when responses arrive in reverse order", async () => {
   const { context, requests, applied } = loaderContext();
   const first = context.loadPreset("a"); const last = context.loadPreset("b");
-  requests.get("b").resolve("B"); await last;
-  requests.get("a").resolve("A"); await first;
+  requests.get("b").resolve("B"); assert.equal(await last, "b");
+  requests.get("a").resolve("A"); assert.equal(await first, undefined);
   assert.deepEqual(applied.map((p) => p.name), ["B"]);
+});
+
+test("preset arrows follow available options through rapid presses without starting a note", async () => {
+  const loaded = []; const stopped = [];
+  const context = vm.createContext({
+    adjacentPresetId, presetCycleCursor:null, librarySelectedId:"a",
+    elements:{ "preset-library":{ open:false }, preset:{ value:"a", options:[
+      { value:"a", disabled:false }, { value:"current", disabled:true }, { value:"b", disabled:false }, { value:"c", disabled:false },
+    ] } },
+    stopAllNotes:() => stopped.push(true), loadPreset:async (id) => { loaded.push(id); return id; },
+    setStatus() {},
+  });
+  vm.runInContext(extract("cyclePreset"), context);
+  context.cyclePreset(1); context.cyclePreset(1); context.cyclePreset(-1);
+  assert.deepEqual(loaded, ["b", "c", "b"]);
+  assert.equal(stopped.length, 3);
+  assert.equal(context.presetCycleCursor, "b");
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test("preset arrows use the visible library order and keep the dialog open for audition", async () => {
+  const loaded = []; const feedback = []; let focused = false;
+  const context = vm.createContext({
+    adjacentPresetId, presetCycleCursor:null, librarySelectedId:"a",
+    elements:{ "preset-library":{ open:true }, "library-detail-name":{ textContent:"C" },
+      "library-list":{ querySelectorAll:() => [{ dataset:{ presetId:"a" } }, { dataset:{ presetId:"c" } }], querySelector:() => ({ focus:() => { focused = true; } }) },
+      preset:{ value:"a" } },
+    stopAllNotes() {}, renderLibrary() {}, libraryFeedback:(message) => feedback.push(message),
+    loadPreset:async (id) => { loaded.push(id); return id; }, setStatus() {},
+  });
+  vm.runInContext(extract("cyclePreset"), context);
+  context.cyclePreset(1);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(loaded, ["c"]);
+  assert.equal(context.librarySelectedId, "c");
+  assert.equal(focused, true);
+  assert.match(feedback.at(-1), /読み込みました/);
 });
 
 test("INIT and edits invalidate pending preset reads and stale errors", async () => {
@@ -76,7 +114,7 @@ test("patch application always clears applying state on an exception", () => {
   const context = vm.createContext({
     validatePatch:(p) => p, patchLoads:createPatchLoadState(), applyingPatch:false,
     clearTimeout() {}, captureTimer:undefined, stopAllNotes() {},
-    syncPresetIdentity() {}, restoreDefaults() { throw new Error("render failed"); },
+    syncPresetIdentity() {}, elements:{ preset:{ value:"current" } }, restoreDefaults() { throw new Error("render failed"); },
   });
   vm.runInContext(extract("applyPatch"), context);
   assert.throws(() => context.applyPatch({ name:"test", category:"Custom" }), /render failed/);

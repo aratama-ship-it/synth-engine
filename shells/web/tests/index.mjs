@@ -5,6 +5,8 @@ import "./wavetable-import.test.mjs";
 import "./get-params.test.mjs";
 import "./node-api.test.mjs";
 import "./studio-presets.test.mjs";
+import "./preset-library.test.mjs";
+import "./patch-bank.test.mjs";
 import "./space-effects.test.mjs";
 import "./note-registry.test.mjs";
 import "./keyboard-input.test.mjs";

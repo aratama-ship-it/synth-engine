@@ -2,7 +2,9 @@ import { createSynthNode, getParams, parsePreset } from "./synth-node.js";
 import { REVERB_MATERIALS, SPACE_DEFAULTS, createSpaceEffects } from "./space-effects.js";
 import { MOD_DEST_BY_PARAM, MOD_DESTINATIONS, MOD_SOURCES, findAssignmentSlot, modulationAmountLabel, modulationSlotIds } from "./mod-matrix.js?m4ao=1";
 import { FX_CORE_PARAM_IDS, FX_DEFAULTS, FX_IDS, fxCoreParams } from "./fx-rack.js?m4ax=1";
-import { MAX_USER_PATCHES, createPatchHistory, createPatchSnapshot, parsePatch, serializePatch, validatePatch } from "./patch-state.js?m4ax=1";
+import { MAX_USER_PATCHES, createPatchHistory, createPatchSnapshot, parsePatch, serializePatch, validatePatch } from "./patch-state.js?library=20260923";
+import { COLLECTION_PRESETS, mergePresetParameters } from "./preset-collection.js?library=20260923";
+import { createPatchBank, planPatchBankImport } from "./patch-bank.js?library=20260923";
 import { analyzeSound } from "./sound-analysis.js";
 import { MATCH_TARGET_RMS_DBFS, candidateRenderPlan, compareSoundAnalyses, levelMatchGain } from "./match-audio.js";
 import { suggestAmpEnvelope } from "./envelope-match.js";
@@ -13,7 +15,7 @@ import { bindNumericInput, bindDialDrag } from "./numeric-control.js";
 import { createPatchLoadState } from "./patch-load-state.js";
 import { insertDefinitions, formatInsertValue, insertSliderPosition, insertSliderValue, insertInputUnit } from "./fx-controls.js";
 import { createSafeWavetableFrame, parseWavetableWav, wavetableFramePosition } from "./wavetable-import.js?m4t=1";
-import { clampKeyboardOctave, keyboardInputId, keyboardOctaveLabel, noteForKeyboardEvent, octaveDeltaForKeyboardEvent } from "./keyboard-input.js?polish=20260923";
+import { adjacentPresetId, clampKeyboardOctave, keyboardInputId, keyboardOctaveLabel, noteForKeyboardEvent, octaveDeltaForKeyboardEvent } from "./keyboard-input.js?library-arrows=20260923";
 
 const paths = { wasm: "../../build/synth_engine.wasm?m4ax=1", presets: "../../presets/" };
 const presets = Object.freeze({
@@ -27,13 +29,14 @@ const presets = Object.freeze({
   brightPluck: { label:"Bright Pluck", file:"studio_bright_pluck.txt", description:"明るく減衰するプラック", space:{ delayOn:true, delayFeedback:.22, delayMix:.12, delayTime:.3, reverbOn:true, reverbMix:.18, reverbMaterial:"grain", reverbDecay:1.3 } },
   motionLead: { label:"Motion Lead", file:"studio_motion_lead.txt", description:"ゆっくり表情が動くリード", space:{ delayOn:true, delayFeedback:.36, delayMix:.12, delayTime:.32, reverbOn:true, reverbMix:.2, reverbMaterial:"grain", reverbDecay:1.5 } },
   airKeys: { label:"Air Keys", file:"studio_air_keys.txt", description:"空気感を残す鍵盤音", space:{ delayOn:false, delayMix:.08, delayTime:.36, reverbOn:true, reverbMix:.3, reverbMaterial:"warm", reverbDecay:2, reverbHighCut:7200 } },
+  ...COLLECTION_PRESETS,
 });
 const bridgeAuditionPresets = Object.freeze({
   pianofy:"/design/preset-bridge-20260909/audition-mod-fx-v2/pianofy.synthengine.json",
   morpheus:"/design/preset-bridge-20260909/audition-mod-fx-v2/morpheus-bass.synthengine.json",
   "neon-drive":"/design/preset-bridge-20260909/audition-mod-fx-v2/neon-drive-sync.synthengine.json",
 });
-const presetCategories = Object.freeze({ epiano:"Keys", saw:"Lead", pluck:"Pluck", bell:"Bell", widePad:"Pad", warmBass:"Bass", glassBell:"Bell", brightPluck:"Pluck", motionLead:"Lead", airKeys:"Keys" });
+const presetCategories = Object.freeze({ epiano:"Keys", saw:"Lead", pluck:"Pluck", bell:"Bell", widePad:"Pad", warmBass:"Bass", glassBell:"Bell", brightPluck:"Pluck", motionLead:"Lead", airKeys:"Keys", ...Object.fromEntries(Object.entries(COLLECTION_PRESETS).map(([id, item]) => [id, item.category])) });
 const CUSTOM_WAVETABLE_SLOT = 4;
 const wavetableNames = Object.freeze(["Basic Shapes", "Analog Sweep", "Digital Edge", "Hollow Formant", "Custom · Session"]);
 const filterModeNames = Object.freeze(["LP12", "BP12", "HP12", "NOTCH", "LP24", "HP24"]);
@@ -99,8 +102,11 @@ const customWavetable = { frames:null, frameCount:0, sampleRate:0, name:"" };
 let customWavetableBusy = false;
 const spaceValues = { ...SPACE_DEFAULTS };
 const fxValues = structuredClone(FX_DEFAULTS);
-const storageKeys = Object.freeze({ autosave:"synth-engine.studio.autosave.v1", patches:"synth-engine.studio.user-patches.v1" });
+const storageKeys = Object.freeze({ autosave:"synth-engine.studio.autosave.v1", patches:"synth-engine.studio.user-patches.v1", favorites:"synth-engine.studio.favorites.v1" });
 let userPatches = [];
+let libraryFavorites = new Set();
+let librarySelectedId = "epiano";
+let presetCycleCursor = null;
 let patchHistory;
 let captureTimer;
 let applyingPatch = false;
@@ -1237,7 +1243,7 @@ function loadUserPatches() {
   try {
     const parsed = JSON.parse(localStorage.getItem(storageKeys.patches) ?? "[]");
     if (!Array.isArray(parsed)) throw new TypeError("saved patch list must be an array");
-    userPatches = parsed.slice(0, MAX_USER_PATCHES).map((item, index) => ({ id:String(item.id ?? `custom-${index}`), patch:validatePatch(item.patch) }));
+    userPatches = parsed.map((item, index) => ({ id:String(item.id ?? `custom-${index}`), patch:validatePatch(item.patch) }));
   } catch { userPatches = []; }
 }
 function storeUserPatches(patches = userPatches) { localStorage.setItem(storageKeys.patches, JSON.stringify(patches)); }
@@ -1255,6 +1261,153 @@ function renderPresets(selectedId = elements.preset.value || "epiano") {
   }
   // Filtering is not loading: never advertise another patch before it has been selected.
   elements.preset.value = selectedId;
+}
+function libraryCatalog() {
+  return [
+    ...Object.entries(presets).map(([id, preset]) => ({ id, name:preset.label, category:presetCategories[id], description:preset.description, source:"builtin" })),
+    ...userPatches.map(({ id, patch }) => ({ id, name:patch.name, category:patch.category, description:"このブラウザに保存した音色", source:"mine" })),
+  ];
+}
+function loadLibraryFavorites() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(storageKeys.favorites) ?? "[]");
+    if (!Array.isArray(stored)) throw new TypeError("favorites must be an array");
+    libraryFavorites = new Set(stored.filter((id) => typeof id === "string"));
+  } catch { libraryFavorites = new Set(); }
+}
+function libraryFeedback(message) { elements["library-feedback"].textContent = message; }
+function renderLibrary() {
+  const catalog = libraryCatalog();
+  const query = elements["library-search"].value.trim().toLocaleLowerCase();
+  const category = elements["library-category"].value;
+  const scope = elements["library-source"].value;
+  const shown = catalog.filter((item) =>
+    (category === "All" || item.category === category) &&
+    (scope === "all" || (scope === "favorite" ? libraryFavorites.has(item.id) : item.source === scope)) &&
+    (!query || `${item.name} ${item.category} ${item.description}`.toLocaleLowerCase().includes(query)));
+  if (!shown.some((item) => item.id === librarySelectedId)) librarySelectedId = shown[0]?.id ?? "";
+  elements["library-count"].textContent = `${shown.length} / ${catalog.length} 音色 · マイ音色 ${userPatches.length}/${MAX_USER_PATCHES}`;
+  const list = elements["library-list"];
+  list.replaceChildren();
+  if (!shown.length) { const empty = document.createElement("p"); empty.className = "library-empty"; empty.textContent = "該当する音色はありません。検索や分類を変えてください。"; list.append(empty); }
+  for (const item of shown) {
+    const row = document.createElement("div"); row.className = "library-row"; row.classList.toggle("is-selected", item.id === librarySelectedId);
+    const pick = document.createElement("button"); pick.type = "button"; pick.className = "library-row-select"; pick.dataset.presetId = item.id; pick.setAttribute("aria-label", `${item.name}の詳細を表示`);
+    const title = document.createElement("strong"); title.textContent = item.name;
+    const detail = document.createElement("small"); detail.textContent = `${item.category} · ${item.source === "builtin" ? "内蔵" : "マイ音色"} · ${item.id === librarySelectedId ? "選択中" : item.description}`;
+    pick.append(title, detail); pick.addEventListener("click", () => { librarySelectedId = item.id; renderLibrary(); elements["library-load"].focus(); });
+    const favorite = document.createElement("button"); favorite.type = "button"; favorite.className = "library-row-favorite"; favorite.dataset.presetId = item.id; favorite.textContent = libraryFavorites.has(item.id) ? "★" : "☆";
+    favorite.setAttribute("aria-label", `${item.name}を${libraryFavorites.has(item.id) ? "お気に入りから外す" : "お気に入りに追加"}`); favorite.setAttribute("aria-pressed", String(libraryFavorites.has(item.id)));
+    favorite.addEventListener("click", () => toggleLibraryFavorite(item.id));
+    const load = document.createElement("button"); load.type = "button"; load.className = "library-row-load"; load.textContent = "LOAD"; load.setAttribute("aria-label", `${item.name}を読み込む`);
+    load.addEventListener("click", () => loadLibraryPreset(item.id));
+    row.append(pick, favorite, load); list.append(row);
+  }
+  if (elements["preset-library"].open) centerSelectedLibraryRow();
+  const selected = shown.find((item) => item.id === librarySelectedId);
+  elements["library-detail-source"].textContent = selected ? (selected.source === "builtin" ? "BUILT-IN PRESET" : "MY PATCH") : "NO SELECTION";
+  elements["library-detail-name"].textContent = selected?.name ?? "音色を選択してください";
+  elements["library-detail-description"].textContent = selected?.description ?? "";
+  elements["library-detail-category"].textContent = selected ? `CATEGORY · ${selected.category}` : "";
+  elements["library-load"].disabled = !selected;
+  elements["library-favorite"].disabled = !selected;
+  elements["library-favorite"].setAttribute("aria-pressed", String(selected ? libraryFavorites.has(selected.id) : false));
+  elements["library-favorite"].textContent = selected && libraryFavorites.has(selected.id) ? "★ お気に入り登録済み" : "☆ お気に入り";
+  elements["library-edit"].hidden = selected?.source !== "mine";
+  if (selected?.source === "mine") { elements["library-edit-name"].value = selected.name; elements["library-edit-category"].value = selected.category; }
+  elements["library-export-bank"].disabled = userPatches.length === 0;
+}
+function toggleLibraryFavorite(id, origin = "row") {
+  const next = new Set(libraryFavorites);
+  if (next.has(id)) next.delete(id); else next.add(id);
+  try {
+    localStorage.setItem(storageKeys.favorites, JSON.stringify([...next])); libraryFavorites = next; renderLibrary();
+    if (origin === "detail") elements["library-favorite"].focus();
+    else ([...elements["library-list"].querySelectorAll(".library-row-favorite")].find((button) => button.dataset.presetId === id) ?? elements["library-source"]).focus();
+  }
+  catch (error) { libraryFeedback(`お気に入りを保存できません: ${error.message}`); }
+}
+function centerSelectedLibraryRow() {
+  const list = elements["library-list"];
+  const row = list.querySelector(".library-row.is-selected");
+  if (!row) return;
+  const target = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop - (list.clientHeight - row.clientHeight) / 2;
+  list.scrollTop = Math.max(0, target);
+}
+function openPresetLibrary() {
+  stopAllNotes();
+  const selected = elements.preset.value;
+  librarySelectedId = libraryCatalog().some((item) => item.id === selected) ? selected : "epiano";
+  libraryFeedback(""); renderLibrary(); elements["preset-library"].showModal(); centerSelectedLibraryRow(); elements["library-search"].focus();
+}
+function closePresetLibrary() { elements["preset-library"].close(); }
+let libraryLoading = false;
+async function loadLibraryPreset(id = librarySelectedId) {
+  if (!id || libraryLoading) return;
+  libraryLoading = true; libraryFeedback("読み込み中…"); stopAllNotes();
+  try { if (await loadPreset(id) === id) closePresetLibrary(); }
+  catch (error) { libraryFeedback(`読み込めません: ${error.message}`); setStatus(`プリセットを読み込めません: ${error.message}`, true); }
+  finally { libraryLoading = false; }
+}
+function downloadLibraryJSON(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2) + "\n"], { type:"application/json" });
+  const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function libraryFilename(name) { return name.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-|-$/g, "") || "synth-patch"; }
+function saveLibraryMetadata(event) {
+  event.preventDefault();
+  const item = userPatches.find((entry) => entry.id === librarySelectedId);
+  if (!item) return;
+  const name = elements["library-edit-name"].value.trim();
+  if (!name) { libraryFeedback("名前を入力してください。"); return; }
+  if (userPatches.some((entry) => entry.id !== item.id && entry.patch.name.toLocaleLowerCase() === name.toLocaleLowerCase())) { libraryFeedback("同じ名前のマイ音色があります。"); return; }
+  const patch = validatePatch({ ...item.patch, name, category:elements["library-edit-category"].value });
+  const next = userPatches.map((entry) => entry.id === item.id ? { id:item.id, patch } : entry);
+  try {
+    storeUserPatches(next); userPatches = next;
+    if (elements.preset.value === item.id) { activePatchIdentity = { name:patch.name, category:patch.category }; saveAutosave(); renderPresets(item.id); }
+    else renderPresets();
+    renderLibrary(); libraryFeedback("名前と分類を保存しました。音のパラメータは変更していません。");
+  } catch (error) { libraryFeedback(`変更を保存できません: ${error.message}`); }
+}
+function duplicateLibraryPatch() {
+  const item = userPatches.find((entry) => entry.id === librarySelectedId);
+  if (!item) return;
+  if (userPatches.length >= MAX_USER_PATCHES) { libraryFeedback(`マイ音色は最大${MAX_USER_PATCHES}件です。`); return; }
+  let name = `${item.patch.name} Copy`; let number = 2;
+  while (userPatches.some((entry) => entry.patch.name.toLocaleLowerCase() === name.toLocaleLowerCase())) name = `${item.patch.name} Copy ${number++}`;
+  const id = `custom-${globalThis.crypto?.randomUUID?.() ?? Date.now()}`;
+  const next = [...userPatches, { id, patch:validatePatch({ ...item.patch, name }) }];
+  try { storeUserPatches(next); userPatches = next; librarySelectedId = id; elements["library-source"].value = "mine"; elements["library-search"].value = ""; elements["library-category"].value = "All"; renderPresets(); renderLibrary(); libraryFeedback(`${name}を複製しました。`); }
+  catch (error) { libraryFeedback(`複製できません: ${error.message}`); }
+}
+function deleteLibraryPatch() {
+  const item = userPatches.find((entry) => entry.id === librarySelectedId);
+  if (!item || !window.confirm(`マイ音色「${item.patch.name}」をこのブラウザから削除しますか？この操作は取り消せません。必要なら先にJSONへ書き出してください。`)) return;
+  const next = userPatches.filter((entry) => entry.id !== item.id);
+  try {
+    storeUserPatches(next); userPatches = next; libraryFavorites.delete(item.id);
+    try { localStorage.setItem(storageKeys.favorites, JSON.stringify([...libraryFavorites])); } catch { /* An orphan favorite is harmless. */ }
+    if (elements.preset.value === item.id) renderPresets("current"); else renderPresets();
+    librarySelectedId = ""; renderLibrary(); libraryFeedback(`${item.patch.name}を削除しました。現在編集中の音はそのままです。`);
+  } catch (error) { libraryFeedback(`削除できません: ${error.message}`); }
+}
+function exportLibraryBank() {
+  if (!userPatches.length) return;
+  downloadLibraryJSON("synthengine-my-patches.json", createPatchBank(userPatches));
+  libraryFeedback(`${userPatches.length}件を書き出しました。ダウンロードしたJSONを保管してください。`);
+}
+async function importLibraryBank(file) {
+  if (!file) return;
+  elements["library-bank-file"].value = "";
+  try {
+    if (file.size > 2_000_000) throw new RangeError("ファイルは2 MB以下にしてください");
+    const bank = JSON.parse(await file.text());
+    const { next, imported, replaces, overwrittenIds } = planPatchBankImport(bank, userPatches, () => `custom-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`);
+    if (replaces && !window.confirm(`同名のマイ音色${replaces}件を置き換え、合計${next.length}件にしますか？現在の音色は変更しません。`)) return;
+    const selectedId = elements.preset.value;
+    storeUserPatches(next); userPatches = next; renderPresets(overwrittenIds.includes(selectedId) ? "current" : selectedId); renderLibrary(); libraryFeedback(`${imported}件を読み込みました（同名置換${replaces}件）。現在の音は変更していません。`);
+  } catch (error) { libraryFeedback(`一括読込みに失敗しました: ${error.message}。保存済み音色は変更していません。`); }
 }
 function syncPresetIdentity(name, category) {
   const custom = userPatches.find((item) => item.patch.name === name && item.patch.category === category);
@@ -1299,6 +1452,7 @@ function applyPatch(candidate, { resetHistory = false, message, persist = true }
     stopAllNotes();
     activePatchIdentity = { name:patch.name, category:patch.category };
     syncPresetIdentity(patch.name, patch.category);
+    presetCycleCursor = elements.preset.value;
     restoreDefaults();
     for (const [id, value] of patch.core) { const parameter = parameterInfo.get(id); if (parameter) values.set(id, normalizedParameterValue(parameter, value)); }
     let customFallback = false;
@@ -1339,7 +1493,7 @@ function saveNamedPatch() {
   if (!existing && userPatches.length >= MAX_USER_PATCHES) { elements["patch-save-warning"].textContent = `最大${MAX_USER_PATCHES}件です。既存名を指定して置き換えるか、先にJSONへ書き出してください。`; return; }
   const patch = capturePatch(trimmed, elements["patch-save-category"].value); const id = existing?.id ?? `custom-${Date.now()}`;
   const nextPatches = existing ? userPatches.map((item) => item === existing ? { id, patch } : item) : [...userPatches, { id, patch }];
-  try { storeUserPatches(nextPatches); userPatches = nextPatches; activePatchIdentity = { name:patch.name, category:patch.category }; patchLoads.invalidate(); clearTimeout(captureTimer); captureTimer = undefined; renderPresets(id); patchHistory.reset(patch); saveAutosave(patch); updateHistoryButtons(); closeSavePanel(); setStatus(`${trimmed}を名前付き保存しました（${userPatches.length}/${MAX_USER_PATCHES}）。`); }
+  try { storeUserPatches(nextPatches); userPatches = nextPatches; activePatchIdentity = { name:patch.name, category:patch.category }; patchLoads.invalidate(); clearTimeout(captureTimer); captureTimer = undefined; renderPresets(id); presetCycleCursor = id; patchHistory.reset(patch); saveAutosave(patch); updateHistoryButtons(); closeSavePanel(); setStatus(`${trimmed}を名前付き保存しました（${userPatches.length}/${MAX_USER_PATCHES}）。`); }
   catch (error) { elements["patch-save-warning"].textContent = `保存できません: ${error.message}`; setStatus(`名前付き保存できません: ${error.message}`, true); }
 }
 function exportCurrentPatch() {
@@ -1386,8 +1540,9 @@ function restoreDefaults() { for (const parameter of parameterInfo.values()) val
 async function loadPreset(id, { persist = true } = {}) {
   const ticket = patchLoads.begin();
   syncPresetIdentity(currentPatchName(), currentPatchCategory());
+  presetCycleCursor = id;
   const custom = userPatches.find((item) => item.id === id);
-  if (custom) { applyPatch(custom.patch, { resetHistory:true, persist }); return; }
+  if (custom) { applyPatch(custom.patch, { resetHistory:true, persist }); return id; }
   let patch;
   const preset = presets[id];
   try {
@@ -1395,11 +1550,39 @@ async function loadPreset(id, { persist = true } = {}) {
     const text = await fetchChecked(`${paths.presets}${preset.file}`, "text");
     if (!patchLoads.isCurrent(ticket)) return;
     patch = createPatchSnapshot({
-      name:preset.label, category:presetCategories[id], core:parsePreset(text),
+      name:preset.label, category:presetCategories[id], core:mergePresetParameters(parsePreset(text), preset.overrides),
       space:{ ...SPACE_DEFAULTS, ...preset.space }, fx:FX_DEFAULTS,
     });
-  } catch (error) { if (patchLoads.isCurrent(ticket)) throw error; return; }
+  } catch (error) { if (patchLoads.isCurrent(ticket)) { presetCycleCursor = elements.preset.value; throw error; } return; }
   applyPatch(patch, { resetHistory:true, message:`${preset.label} — ${preset.description}`, persist });
+  return id;
+}
+function cyclePreset(direction) {
+  const browsing = elements["preset-library"].open;
+  const ids = browsing
+    ? [...elements["library-list"].querySelectorAll(".library-row-select")].map((button) => button.dataset.presetId)
+    : [...elements.preset.options].filter((option) => !option.disabled).map((option) => option.value);
+  const currentId = browsing ? librarySelectedId : (presetCycleCursor ?? elements.preset.value);
+  const id = adjacentPresetId(ids, currentId, direction);
+  if (!id || id === currentId) return;
+  stopAllNotes();
+  if (browsing) {
+    librarySelectedId = id;
+    renderLibrary();
+    elements["library-list"].querySelector(".library-row.is-selected .library-row-select")?.focus();
+    libraryFeedback("読み込み中…");
+  }
+  const pending = loadPreset(id);
+  presetCycleCursor = id;
+  void pending.then((appliedId) => {
+    if (appliedId === id && browsing && elements["preset-library"].open && librarySelectedId === id)
+      libraryFeedback(`${elements["library-detail-name"].textContent}を読み込みました。鍵盤で試奏できます。`);
+  }).catch((error) => {
+    if (presetCycleCursor === id) presetCycleCursor = elements.preset.value;
+    const message = `プリセットを読み込めません: ${error.message}`;
+    if (browsing && elements["preset-library"].open) libraryFeedback(message);
+    setStatus(message, true);
+  });
 }
 function initPatch() {
   applyPatch(createPatchSnapshot({ name:"INIT", category:"Custom", core:[], space:SPACE_DEFAULTS, fx:FX_DEFAULTS }), {
@@ -1666,13 +1849,20 @@ function bindKey(element, note) {
 }
 function installKeyboard() {
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") { event.preventDefault(); panicAudio({ broadcast:true }); if (elements["mod-dialog"].open) elements["mod-dialog"].close(); return; }
+    if (event.key === "Escape") { event.preventDefault(); panicAudio({ broadcast:true }); if (elements["mod-dialog"].open) elements["mod-dialog"].close(); if (elements["preset-library"].open) closePresetLibrary(); return; }
     // Keep keyup identity unfiltered; modifiers pressed after a note must still release it.
     if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) {
       if (activeKeyboardTokens.size) panicAudio();
       return;
     }
-    if (event.repeat || elements["mod-dialog"].open || !elements["patch-save-overlay"].hidden || event.target.matches('input:not([type="range"]),select,textarea')) return;
+    if (event.repeat || elements["mod-dialog"].open || !elements["patch-save-overlay"].hidden) return;
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      if (event.shiftKey || event.target.matches('select:not(#preset),textarea,input:not(#library-search),[role="slider"]') || event.target.closest('[contenteditable="true"]')) return;
+      event.preventDefault();
+      cyclePreset(event.key === "ArrowDown" ? 1 : -1);
+      return;
+    }
+    if ((elements["preset-library"].open && !event.target.matches(".library-row-select")) || event.target.matches('input:not([type="range"]),select,textarea')) return;
     const octaveDelta = octaveDeltaForKeyboardEvent(event);
     if (octaveDelta) { event.preventDefault(); shiftKeyboardOctave(octaveDelta); return; }
     const note = noteForKeyboardEvent(event, keyboardOctave);
@@ -1709,6 +1899,21 @@ elements["panic-audio"].addEventListener("click", (event) => { if (event.detail 
 elements.preset.addEventListener("change", () => { const id = elements.preset.value; elements.preset.blur(); loadPreset(id).catch((error) => setStatus(error.message, true)); });
 elements["preset-search"].addEventListener("input", () => renderPresets()); elements["preset-category"].addEventListener("change", () => renderPresets());
 elements["save-patch"].addEventListener("click", openSavePanel);
+elements["open-library"].addEventListener("click", openPresetLibrary);
+elements["library-close"].addEventListener("click", closePresetLibrary);
+elements["preset-library"].addEventListener("close", () => { libraryFeedback(""); elements["open-library"].focus(); });
+elements["library-search"].addEventListener("input", renderLibrary);
+elements["library-category"].addEventListener("change", renderLibrary);
+elements["library-source"].addEventListener("change", renderLibrary);
+elements["library-load"].addEventListener("click", () => loadLibraryPreset());
+elements["library-favorite"].addEventListener("click", () => { if (librarySelectedId) toggleLibraryFavorite(librarySelectedId, "detail"); });
+elements["library-edit"].addEventListener("submit", saveLibraryMetadata);
+elements["library-duplicate"].addEventListener("click", duplicateLibraryPatch);
+elements["library-delete"].addEventListener("click", deleteLibraryPatch);
+elements["library-export-one"].addEventListener("click", () => { const item = userPatches.find((entry) => entry.id === librarySelectedId); if (item) { downloadLibraryJSON(`${libraryFilename(item.patch.name)}.json`, item.patch); libraryFeedback(`${item.patch.name}を書き出しました。`); } });
+elements["library-export-bank"].addEventListener("click", exportLibraryBank);
+elements["library-import-bank"].addEventListener("click", () => elements["library-bank-file"].click());
+elements["library-bank-file"].addEventListener("change", () => importLibraryBank(elements["library-bank-file"].files?.[0]));
 elements["patch-save-panel"].addEventListener("submit", (event) => { event.preventDefault(); saveNamedPatch(); });
 elements["patch-save-cancel"].addEventListener("click", closeSavePanel);
 elements["patch-name"].addEventListener("input", () => { saveReplacePending = false; elements["patch-save-confirm"].textContent = "SAVE"; elements["patch-save-warning"].textContent = `このブラウザへ最大${MAX_USER_PATCHES}件保存できます。`; });
@@ -1728,7 +1933,7 @@ elements["export-patch"].addEventListener("click", exportCurrentPatch); elements
 
 try {
   wasmBytes = await fetchChecked(paths.wasm); const parameters = await getParams(wasmBytes); parameters.forEach((parameter) => { parameterInfo.set(parameter.id, parameter); values.set(parameter.id, parameter.default); });
-  const savedAutosave = readAutosave(); loadUserPatches(); renderPresets(); renderControls(); renderPiano(); installTabs(); installEditorBanks(); installModDialog(); installQualityLab(); installOscWarpSurface(); installWavetableImport(); installSoundMatch();
+  const savedAutosave = readAutosave(); loadUserPatches(); loadLibraryFavorites(); renderPresets(); renderControls(); renderPiano(); installTabs(); installEditorBanks(); installModDialog(); installQualityLab(); installOscWarpSurface(); installWavetableImport(); installSoundMatch();
   const requestedTab = urlParams.get("tab");
   if (tabOrder.includes(requestedTab)) selectTab(requestedTab);
   installAudioSession(); installKeyboard(); await loadPreset(elements.preset.value, { persist:false }); patchHistory = createPatchHistory(capturePatch());
@@ -1745,4 +1950,5 @@ try {
   }
   if (!savedAutosave && requestedBridgePreset === null) saveAutosave();
   await prepareAudio(); updateHistoryButtons(); if (!elements.status.classList.contains("error") && !startupStatusSet) setStatus("準備完了。鍵盤またはPCキーを押すと音源を開始します。");
+  if (urlParams.get("browse") === "1") openPresetLibrary();
 } catch (error) { setStatus(error.message, true); }

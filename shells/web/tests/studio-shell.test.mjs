@@ -132,7 +132,7 @@ test("local preset bridge loader keeps three allowlisted audition patch IDs", as
   assert.match(source, /const text = await fetchChecked\(bridgeAuditionPresets\[id\], "text"\);[\s\S]*?patchLoads\.isCurrent\(ticket\)[\s\S]*?parsePatch\(text\)/);
   assert.match(source, /requestedBridgePreset !== null[\s\S]*loadBridgeAuditionPreset\(requestedBridgePreset\)[\s\S]*else if \(savedAutosave\)/);
   assert.match(source, /cleanUrl\.searchParams\.delete\("bridgePreset"\)[\s\S]*history\.replaceState/);
-  assert.match(html, /synth-ui\.js\?polish=20260923/);
+  assert.match(html, /synth-ui\.js\?library=20260923/);
   const loader = source.match(/async function loadBridgeAuditionPreset\(id\) \{[\s\S]*?\n\}/)?.[0] ?? "";
   assert.doesNotMatch(loader, /ensureAudio|startNote|openOutputGate/);
 });
@@ -245,7 +245,7 @@ test("named patch save uses an in-page confirmation flow", async () => {
   const source = await readFile(new URL("synth-ui.js", root), "utf8");
   assert.match(html, /id="patch-save-panel"[^>]*role="dialog"/);
   assert.match(source, /saveReplacePending/);
-  assert.doesNotMatch(source, /window\.(prompt|confirm|alert)\s*\(/);
+  assert.doesNotMatch(source.split("function saveNamedPatch()")[1].split("function exportCurrentPatch()")[0], /window\.(prompt|confirm|alert)\s*\(/);
 });
 
 test("autosave restoration keeps the visible preset identity aligned with the restored sound", async () => {

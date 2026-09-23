@@ -15,7 +15,7 @@ test("patch JSON roundtrips core, modulation, space, insert state, and order", (
   assert.equal(after.space.reverbDecay, 4.2);
   assert.equal(after.space.reverbDamping, .25);
   assert.equal(after.fx.modules.chorus.on, true);
-  assert.equal(MAX_USER_PATCHES, 8);
+  assert.equal(MAX_USER_PATCHES, 64);
 });
 
 test("patch parser rejects schema drift, duplicate IDs, non-finite values, and malformed JSON", () => {

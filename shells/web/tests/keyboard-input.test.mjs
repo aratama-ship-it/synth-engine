@@ -5,6 +5,7 @@ import { importSource } from "./load-module.mjs";
 const {
   KEYBOARD_OCTAVE_MIN,
   KEYBOARD_OCTAVE_MAX,
+  adjacentPresetId,
   clampKeyboardOctave,
   keyboardInputId,
   keyboardOctaveLabel,
@@ -40,4 +41,15 @@ test("shortcuts and IME never start notes or change octaves, but keyup keeps its
     assert.equal(keyboardInputId({ code:"KeyS", [modifier]:true }), "KeyS");
   }
   assert.equal(noteForKeyboardEvent({ code:"KeyS", shiftKey:true }), 62);
+});
+
+test("preset arrows follow the displayed order and wrap at both ends", () => {
+  const ids = ["epiano", "saw", "custom-1"];
+  assert.equal(adjacentPresetId(ids, "epiano", 1), "saw");
+  assert.equal(adjacentPresetId(ids, "saw", -1), "epiano");
+  assert.equal(adjacentPresetId(ids, "custom-1", 1), "epiano");
+  assert.equal(adjacentPresetId(ids, "epiano", -1), "custom-1");
+  assert.equal(adjacentPresetId(ids, "current", 1), "epiano");
+  assert.equal(adjacentPresetId(ids, "current", -1), "custom-1");
+  assert.equal(adjacentPresetId([], "epiano", 1), undefined);
 });

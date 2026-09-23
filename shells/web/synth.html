@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="SynthEngineのウェーブテーブル・シンセサイザーをブラウザで演奏し編集する画面">
   <title>SynthEngine — Web Synth</title>
-  <link rel="stylesheet" href="./synth-ui.css?polish=20260923">
+  <link rel="stylesheet" href="./synth-ui.css?library=20260923">
 </head>
 <body>
   <header class="topbar">
@@ -13,6 +13,7 @@
     <div class="top-controls">
       <button id="panic-audio" class="button button-emergency" type="button" aria-label="音をただちに停止">STOP SOUND</button>
       <label class="preset-picker">PRESET <select id="preset" aria-label="プリセット"></select></label>
+      <button id="open-library" class="button button-main" type="button">LIBRARY</button>
       <button id="save-patch" class="button button-quiet" type="button">SAVE</button>
       <button id="undo" class="button button-quiet" type="button" disabled>UNDO</button>
       <button id="redo" class="button button-quiet" type="button" disabled>REDO</button>
@@ -42,6 +43,18 @@
       <div class="patch-save-actions"><button id="patch-save-cancel" class="button button-quiet" type="button">CANCEL</button><button id="patch-save-confirm" class="button button-main" type="submit">SAVE</button></div>
     </form>
   </div>
+
+  <dialog id="preset-library" class="preset-library" aria-labelledby="library-title" aria-describedby="library-help">
+    <div class="library-heading"><div><p class="eyebrow">SYNTHENGINE · SOUND LIBRARY</p><h2 id="library-title">音色を探す・整理する</h2><p id="library-help">↑/↓で表示中の音色を順に読み込みます（自動発音なし）。切替後はそのままA〜Kで試奏。クリック選択はLOADで適用してください。</p></div><button id="library-close" class="button button-quiet" type="button" aria-label="ライブラリを閉じる">CLOSE</button></div>
+    <div class="library-filters">
+      <label>SEARCH<input id="library-search" type="search" placeholder="音色名・特徴を検索" autocomplete="off"></label>
+      <label>CATEGORY<select id="library-category"><option value="All">すべて</option><option>Pad</option><option>Bass</option><option>Pluck</option><option>Bell</option><option>Lead</option><option>Keys</option><option>FX</option><option>Custom</option></select></label>
+      <label>SHOW<select id="library-source"><option value="all">すべて</option><option value="builtin">内蔵</option><option value="mine">マイ音色</option><option value="favorite">お気に入り</option></select></label>
+    </div>
+    <p id="library-feedback" class="library-feedback" role="status" aria-live="polite"></p>
+    <div class="library-content"><section class="library-results" aria-label="音色一覧"><p id="library-count" class="library-count" role="status" aria-live="polite"></p><div id="library-list" class="library-list"></div></section><section class="library-detail" aria-label="選択した音色"><p id="library-detail-source" class="eyebrow"></p><h3 id="library-detail-name"></h3><p id="library-detail-description"></p><p id="library-detail-category"></p><div class="library-detail-actions"><button id="library-load" class="button button-main" type="button">LOAD</button><button id="library-favorite" class="button button-quiet" type="button" aria-pressed="false">☆ お気に入り</button></div><form id="library-edit" class="library-edit" hidden><p class="eyebrow">MY PATCH · 整理</p><label>NAME<input id="library-edit-name" maxlength="80" required></label><label>CATEGORY<select id="library-edit-category"><option>Pad</option><option>Bass</option><option>Pluck</option><option>Bell</option><option>Lead</option><option>Keys</option><option>FX</option><option>Custom</option></select></label><button class="button button-quiet" type="submit">名前・分類を保存</button><div class="library-manage"><button id="library-duplicate" class="button button-quiet" type="button">複製</button><button id="library-export-one" class="button button-quiet" type="button">JSON書出し</button><button id="library-delete" class="button button-quiet" type="button">削除</button></div></form></section></div>
+    <footer class="library-footer"><p>マイ音色はこのブラウザ内に最大64件。別端末やブラウザ消去に備えて書き出してください。</p><div class="library-manage"><button id="library-import-bank" class="button button-quiet" type="button">一括読込み</button><input id="library-bank-file" class="visually-hidden" type="file" accept="application/json,.json" tabindex="-1"><button id="library-export-bank" class="button button-quiet" type="button">一括書出し</button></div></footer>
+  </dialog>
 
   <dialog id="mod-dialog" class="mod-dialog" aria-labelledby="mod-dialog-title" aria-describedby="mod-dialog-help">
     <form id="mod-dialog-form">
@@ -334,10 +347,10 @@
     </section>
 
     <section class="keyboard-section" aria-labelledby="keyboard-title">
-      <div class="performance-strip"><div><p class="eyebrow">PERFORMANCE</p><h2 id="keyboard-title">MACROS + PLAY</h2></div><div class="performance-controls"><div id="performance-macros" class="performance-macros"></div><section class="performance-voice" aria-label="発音モードとグライド"><p>VOICE</p><div id="voice-controls" class="global-controls" aria-label="発音モードとグライド"></div></section></div><div class="keyboard-guide"><p>PC: Z OCT− / X OCT+ · A W S E D F T G Y H U J K · 初回入力でAudio開始</p><strong id="keyboard-octave-state" aria-live="polite">OCTAVE 0 · C4–C5</strong></div></div>
+      <div class="performance-strip"><div><p class="eyebrow">PERFORMANCE</p><h2 id="keyboard-title">MACROS + PLAY</h2></div><div class="performance-controls"><div id="performance-macros" class="performance-macros"></div><section class="performance-voice" aria-label="発音モードとグライド"><p>VOICE</p><div id="voice-controls" class="global-controls" aria-label="発音モードとグライド"></div></section></div><div class="keyboard-guide"><p>PC: ↑/↓ PRESET · Z OCT− / X OCT+ · A W S E D F T G Y H U J K · 初回入力でAudio開始</p><strong id="keyboard-octave-state" aria-live="polite">OCTAVE 0 · C4–C5</strong></div></div>
       <div class="piano-scroll"><div id="piano" class="piano" aria-label="C4からC6までの鍵盤"></div></div>
     </section>
   </main>
-  <script type="module" src="./synth-ui.js?polish=20260923"></script>
+  <script type="module" src="./synth-ui.js?library=20260923-arrows"></script>
 </body>
 </html>
